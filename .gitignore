@@ -1,0 +1,18 @@
+# Dependencies and local environments
+node_modules/
+.venv/
+.venv-*/
+
+# Local election data and generated scraper output
+data/
+
+# Runtime, temporary, and backup files
+*.tmp
+*.bak
+*.log
+missing_places.json
+place_overrides.json
+
+# Local editor and operating-system files
+.vscode/
+.DS_Store

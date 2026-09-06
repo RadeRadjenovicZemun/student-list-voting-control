@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Signal Voting Dashboard</title>
+        <link rel="stylesheet" href="style.css" />
+
+  </head>
+  <body>
+    <div class="app-grid">
+      <aside class="sidebar" id="sidebar">
+        <button class="sidebar-pin pinned" id="sidebarPin" type="button" aria-label="Unpin sidebar" title="Unpin sidebar">📌</button>
+        <div class="sidebar-resize-handle" id="sidebarResizeHandle" aria-label="Resize sidebar"></div>
+        <div class="sidebar-inner">
+          <div class="logo">Dashboard</div>
+          <nav class="menu" id="sidebarMenu"></nav>
+
+          <div class="sidebar-language" id="sidebarLanguagePanel" aria-label="Language selector">
+            <div id="sidebarLanguageLabel" class="menu-language-label">Language</div>
+            <select id="sidebarLanguageSelect" class="menu-language-select" aria-label="Language"></select>
+          </div>
+
+          <div id="sidebarConfigFooter" class="sidebar-footer small">Config: static (edit data/config.json)</div>
+          <div id="sidebarLastUpdated" class="sidebar-footer small" style="margin-top:6px;">Last updated: --:--:--</div>
+        </div>
+        <div class="sidebar-collapsed-label" aria-hidden="true">Dashboard</div>
+      </aside>
+
+      <main class="main">
+        <div class="page-banner">
+          <div class="banner-main">
+            <div class="eyebrow">Dashboard</div>
+            <h2 id="pageBannerTitle">TBD</h2>
+          </div>
+          <div class="banner-time">
+            <div class="time-label">VREME</div>
+            <div id="bannerDate" class="banner-date">--.--.----</div>
+            <div id="bannerClock" class="value">--:--:--</div>
+          </div>
+        </div>
+
+        <header class="main-header">
+          <h1 id="pageTitle">Izlaznost</h1>
+        </header>
+
+        <div id="parliamentaryOnlyNotice" class="box small" style="display:none; margin-bottom:16px;"></div>
+
+        <section id="panel-izlaznost" class="panel active-panel">
+          <div class="panel-content turnout-content">
+            <div class="cards" id="regionCards">
+              <!-- Region cards will be inserted here -->
+            </div>
+            <div style="height:12px"></div>
+
+            <div id="regionChart" class="box region-chart" style="margin-bottom:12px; display:none;">
+              <div class="region-chart-header">
+                <button id="regionChartToggle" class="region-chart-toggle" type="button" aria-label="Toggle region chart" data-expanded="1">▼</button>
+                <h3 id="regionChartTitle">Pregled po regionima</h3>
+              </div>
+              <div id="regionChartContent">
+                <div class="turnout-tabs" role="tablist" aria-label="Turnout tabs">
+                  <button type="button" class="turnout-tab-btn active" data-turnout-tab="turnout-tab-per-region" role="tab" aria-selected="true">Turnout per Region</button>
+                  <button type="button" class="turnout-tab-btn" data-turnout-tab="turnout-tab-coverage" role="tab" aria-selected="false">Coverage</button>
+                </div>
+
+                <div id="turnout-tab-per-region" class="turnout-tab-panel active" role="tabpanel">
+                  <div id="regionChartRows" class="region-chart-rows"></div>
+                </div>
+
+                <div id="turnout-tab-coverage" class="turnout-tab-panel" role="tabpanel"></div>
+              </div>
+            </div>
+
+            <div class="tree-container" id="regionsTree"></div>
+          </div>
+          <div class="under-construction-overlay" id="turnoutConstructionOverlay">Under Construction</div>
+        </section>
+
+        <section id="panel-rezultati" class="panel" style="display:none">
+          <div class="panel-content results-content">
+            <div class="cards" id="resultsRegionCards"></div>
+            <div style="height:12px"></div>
+
+            <div id="resultsRegionChart" class="box region-chart" style="margin-bottom:12px; display:none;">
+              <div class="region-chart-header">
+                <button id="resultsRegionChartToggle" class="region-chart-toggle" type="button" aria-label="Toggle results chart" data-expanded="1">▼</button>
+                <h3 id="resultsRegionChartTitle">Results per Region</h3>
+              </div>
+              <div id="resultsRegionChartContent">
+                <div class="results-tabs" role="tablist" aria-label="Results tabs">
+                  <button type="button" class="results-tab-btn active" data-results-tab="results-tab-per-region" role="tab" aria-selected="true">Results per Region</button>
+                  <button type="button" class="results-tab-btn" data-results-tab="results-tab-coverage" role="tab" aria-selected="false">Coverage</button>
+                </div>
+
+                <div id="results-tab-per-region" class="results-tab-panel active" role="tabpanel">
+                  <div id="resultsRegionChartRows" class="region-chart-rows"></div>
+                </div>
+
+                <div id="results-tab-coverage" class="results-tab-panel" role="tabpanel"></div>
+              </div>
+            </div>
+
+            <div class="tree-container" id="resultsTree"></div>
+          </div>
+          <div class="under-construction-overlay" id="resultsConstructionOverlay">Under Construction</div>
+        </section>
+
+        <section id="panel-debug" class="panel" style="display:none">
+          <div class="box">
+            <div class="debug-tabs" role="tablist" aria-label="Debug tabs">
+              <button type="button" class="debug-tab-btn active" data-debug-tab="debug-tab-settings" role="tab" aria-selected="true">Podesavanja</button>
+              <button type="button" class="debug-tab-btn" data-debug-tab="debug-tab-main" role="tab" aria-selected="false">Debug</button>
+            </div>
+
+            <div id="debug-tab-main" class="debug-tab-panel" role="tabpanel">
+              <div class="debug-main-tabs" role="tablist" aria-label="Debug message tabs">
+                <button type="button" class="debug-main-tab-btn active" data-debug-main-tab="debug-main-tab-message" role="tab" aria-selected="true">Message</button>
+                <button type="button" class="debug-main-tab-btn" data-debug-main-tab="debug-main-tab-in-progress" role="tab" aria-selected="false">In Progress</button>
+                <button type="button" class="debug-main-tab-btn" data-debug-main-tab="debug-main-tab-database" role="tab" aria-selected="false">Data Base</button>
+              </div>
+
+              <div id="debug-main-tab-message" class="debug-main-tab-panel active" role="tabpanel">
+                <details id="debugMessageFilterPanel" class="debug-message-filter">
+                  <summary id="debugMessageFilterLabel" class="debug-message-filter-title">Filter</summary>
+                  <div class="debug-message-filter-options">
+                    <div class="debug-message-filter-row">
+                      <label class="debug-message-filter-row-toggle">
+                        <input id="debugMessageColumnDateToggle" type="checkbox" data-debug-message-col-toggle="date" checked>
+                        <span id="debugMessageColumnDateLabel">Date</span>
+                      </label>
+                      <div id="debugMessageFilterDateControls" class="debug-message-filter-row-controls">
+                        <select id="debugMessageFilterDateFrom"></select>
+                        <span class="debug-message-filter-range-separator">—</span>
+                        <select id="debugMessageFilterDateTo"></select>
+                      </div>
+                    </div>
+                    <div class="debug-message-filter-row">
+                      <label class="debug-message-filter-row-toggle">
+                        <input id="debugMessageColumnTimeToggle" type="checkbox" data-debug-message-col-toggle="time" checked>
+                        <span id="debugMessageColumnTimeLabel">Time</span>
+                      </label>
+                      <div id="debugMessageFilterTimeControls" class="debug-message-filter-row-controls">
+                        <select id="debugMessageFilterTimeFrom"></select>
+                        <span class="debug-message-filter-range-separator">—</span>
+                        <select id="debugMessageFilterTimeTo"></select>
+                      </div>
+                    </div>
+                    <div class="debug-message-filter-row">
+                      <label class="debug-message-filter-row-toggle">
+                        <input id="debugMessageColumnPartyToggle" type="checkbox" data-debug-message-col-toggle="party" checked>
+                        <span id="debugMessageColumnPartyLabel">Sender/Target</span>
+                      </label>
+                      <div id="debugMessageFilterPartyControls" class="debug-message-filter-row-controls">
+                        <select id="debugMessageFilterParty"></select>
+                      </div>
+                    </div>
+                    <div class="debug-message-filter-row">
+                      <label class="debug-message-filter-row-toggle">
+                        <input id="debugMessageColumnMessageToggle" type="checkbox" data-debug-message-col-toggle="message" checked>
+                        <span id="debugMessageColumnMessageLabel">Message type</span>
+                      </label>
+                      <div id="debugMessageFilterMessageControls" class="debug-message-filter-row-controls">
+                        <select id="debugMessageFilterMessage"></select>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+
+                <div class="debug-valid-message-actions">
+                  <button id="debugDeleteSelectedMessagesBtn" type="button">Delete selected messages</button>
+                </div>
+                <div id="debugSelectedMessageActionResult" class="small"></div>
+
+                <div class="debug-valid-message-tabs" role="tablist" aria-label="Debug valid message tabs">
+                  <button type="button" class="debug-valid-message-tab-btn active" data-debug-valid-tab="debug-valid-incoming" role="tab" aria-selected="true">Incoming</button>
+                  <button type="button" class="debug-valid-message-tab-btn" data-debug-valid-tab="debug-valid-outgoing" role="tab" aria-selected="false">Outgoing</button>
+                </div>
+
+                <div id="debug-valid-incoming" class="debug-valid-message-tab-panel active" role="tabpanel">
+                  <div class="debug-valid-message-table-wrap">
+                    <table class="debug-valid-message-table">
+                      <thead>
+                        <tr>
+                          <th data-debug-message-col="select"><input id="debugSelectAllIncoming" type="checkbox" aria-label="Select all incoming"></th>
+                          <th data-debug-message-col="date">Date</th>
+                          <th data-debug-message-col="time">Time</th>
+                          <th data-debug-message-col="party">Sender</th>
+                          <th data-debug-message-col="message">Message</th>
+                        </tr>
+                      </thead>
+                      <tbody id="debugValidIncomingBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div id="debug-valid-outgoing" class="debug-valid-message-tab-panel" role="tabpanel">
+                  <div class="debug-valid-message-table-wrap">
+                    <table class="debug-valid-message-table">
+                      <thead>
+                        <tr>
+                          <th data-debug-message-col="select"><input id="debugSelectAllOutgoing" type="checkbox" aria-label="Select all outgoing"></th>
+                          <th data-debug-message-col="date">Date</th>
+                          <th data-debug-message-col="time">Time</th>
+                          <th data-debug-message-col="party">Target</th>
+                          <th data-debug-message-col="message">Message</th>
+                        </tr>
+                      </thead>
+                      <tbody id="debugValidOutgoingBody"></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              <div id="debug-main-tab-in-progress" class="debug-main-tab-panel" role="tabpanel">
+                <div class="signal-message-table-wrap">
+                  <table class="signal-message-table" style="width:100%">
+                    <thead>
+                      <tr>
+                        <th id="debugRawDateHeader" style="white-space:nowrap;width:90px">Date</th>
+                        <th id="debugRawTimeHeader" style="white-space:nowrap;width:80px">Time</th>
+                        <th id="debugRawDirectionHeader" style="white-space:nowrap;width:90px">Direction</th>
+                        <th id="debugRawPayloadHeader">Raw payload</th>
+                      </tr>
+                    </thead>
+                    <tbody id="debugRawMessagesBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div id="debug-main-tab-database" class="debug-main-tab-panel" role="tabpanel">
+                <div style="margin-top:8px;">
+                  <button id="dbClearDataBtn" type="button" style="margin-bottom:14px;">Clear Data</button>
+                  <div id="dbClearDataResult" class="small" style="margin-bottom:10px;"></div>
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-bottom:2px;">
+                      <input type="checkbox" id="dbClearAll">
+                      <span id="dbClearAllLabel">ALL</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="dbClearSender" class="db-clear-item">
+                      <span id="dbClearSenderLabel">Clear Sender</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="dbClearStatus" class="db-clear-item">
+                      <span id="dbClearStatusLabel">Clear Status</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="dbClearTurnout" class="db-clear-item">
+                      <span id="dbClearTurnoutLabel">Clear TurnoutVotes</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="dbClearResults" class="db-clear-item">
+                      <span id="dbClearResultsLabel">Clear Results</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="dbClearCorrection" class="db-clear-item">
+                      <span id="dbClearCorrectionLabel">Clear Correction</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+            <div id="debug-tab-settings" class="debug-tab-panel active" role="tabpanel">
+              <div class="settings-tabs" role="tablist" aria-label="Settings tabs">
+                <button type="button" class="settings-tab-btn active" data-settings-tab="settings-tab-stopwatch" role="tab" aria-selected="true">Stopwatch</button>
+                <button type="button" class="settings-tab-btn" data-settings-tab="settings-tab-election-phase" role="tab" aria-selected="false">Election Phase</button>
+                <button type="button" class="settings-tab-btn" data-settings-tab="settings-tab-signal" role="tab" aria-selected="false">Signal</button>
+              </div>
+
+              <div id="settings-tab-stopwatch" class="settings-tab-panel active" role="tabpanel">
+                <div style="margin-top:4px; padding-top:4px;">
+                  <div id="stopwatchExplanation" class="stopwatch-explanation">Start and measure duration of election phase</div>
+                  <div class="stopwatch-controls">
+                    <button id="stopwatchStartBtn" class="stopwatch-control idle" type="button">Start</button>
+                    <button id="stopwatchStopBtn" class="stopwatch-control active" type="button">Stop</button>
+                  </div>
+                  <div id="stopwatchStatus" class="stopwatch-status">Stopped · Duration: 00:00:00</div>
+                </div>
+              </div>
+
+              <div id="settings-tab-signal" class="settings-tab-panel" role="tabpanel">
+                <div style="margin-top:4px; padding-top:4px;">
+                  <div id="signalDescription" class="stopwatch-explanation">Connects to Signal App group responsible for collecting election results and different statuses</div>
+                  <div id="signalStatusBadge" class="signal-status disconnected">Checking...</div>
+
+                  <div class="signal-controls">
+                    <label>
+                      <span id="signalGroupLabel">Signal group</span>
+                      <select id="signalGroupSelect"></select>
+                    </label>
+                  </div>
+
+                  <div id="signalSummary" class="signal-summary">
+                    Local Signal bridge status will appear here.
+                  </div>
+
+                  <details id="signalColumnFilterPanel" class="signal-column-filter">
+                    <summary id="signalColumnFilterLabel" class="signal-column-filter-title">Filter</summary>
+                    <div class="signal-column-filter-options">
+                      <div class="signal-filter-row">
+                        <label class="signal-filter-row-toggle">
+                          <input id="signalColumnDateToggle" type="checkbox" data-signal-col-toggle="date" checked>
+                          <span id="signalColumnDateLabel">Date</span>
+                        </label>
+                        <div id="signalFilterDateControls" class="signal-filter-row-controls">
+                          <select id="signalFilterDateFrom"></select>
+                          <span class="signal-filter-range-separator">—</span>
+                          <select id="signalFilterDateTo"></select>
+                        </div>
+                      </div>
+                      <div class="signal-filter-row">
+                        <label class="signal-filter-row-toggle">
+                          <input id="signalColumnTimeToggle" type="checkbox" data-signal-col-toggle="time" checked>
+                          <span id="signalColumnTimeLabel">Time</span>
+                        </label>
+                        <div id="signalFilterTimeControls" class="signal-filter-row-controls">
+                          <select id="signalFilterTimeFrom"></select>
+                          <span class="signal-filter-range-separator">—</span>
+                          <select id="signalFilterTimeTo"></select>
+                        </div>
+                      </div>
+                      <div class="signal-filter-row">
+                        <label class="signal-filter-row-toggle">
+                          <input id="signalColumnPartyToggle" type="checkbox" data-signal-col-toggle="party" checked>
+                          <span id="signalColumnPartyLabel">Sender/Target</span>
+                        </label>
+                        <div id="signalFilterPartyControls" class="signal-filter-row-controls">
+                          <select id="signalFilterParty"></select>
+                        </div>
+                      </div>
+                      <div class="signal-filter-row">
+                        <label class="signal-filter-row-toggle">
+                          <input id="signalColumnMessageToggle" type="checkbox" data-signal-col-toggle="message" checked>
+                          <span id="signalColumnMessageLabel">Message type</span>
+                        </label>
+                        <div id="signalFilterMessageControls" class="signal-filter-row-controls">
+                          <select id="signalFilterMessage"></select>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+
+                  <div class="signal-message-tabs" role="tablist" aria-label="Signal message tabs">
+                    <button type="button" class="signal-message-tab-btn active" data-signal-message-tab="signal-incoming-messages" role="tab" aria-selected="true">Incoming</button>
+                    <button type="button" class="signal-message-tab-btn" data-signal-message-tab="signal-outgoing-messages" role="tab" aria-selected="false">Outgoing</button>
+                  </div>
+
+                  <div id="signal-incoming-messages" class="signal-message-tab-panel active" role="tabpanel">
+                    <div class="signal-message-table-wrap">
+                      <table class="signal-message-table">
+                        <thead>
+                          <tr>
+                            <th data-signal-col="date">Date</th>
+                            <th data-signal-col="time">Time</th>
+                            <th data-signal-col="party">Sender</th>
+                            <th data-signal-col="message">Message</th>
+                          </tr>
+                        </thead>
+                        <tbody id="signalIncomingMessagesBody"></tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div id="signal-outgoing-messages" class="signal-message-tab-panel" role="tabpanel">
+                    <div class="signal-message-table-wrap">
+                      <table class="signal-message-table">
+                        <thead>
+                          <tr>
+                            <th data-signal-col="date">Date</th>
+                            <th data-signal-col="time">Time</th>
+                            <th data-signal-col="party">Target</th>
+                            <th data-signal-col="message">Message</th>
+                          </tr>
+                        </thead>
+                        <tbody id="signalOutgoingMessagesBody"></tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="settings-tab-election-phase" class="settings-tab-panel" role="tabpanel">
+                <div class="election-phase-tabs" role="tablist" aria-label="Election phase tabs">
+                  <button type="button" class="election-phase-tab-btn active" data-election-phase-tab="election-phase-tab-parliamentary" role="tab" aria-selected="true">Parliamentary elections</button>
+                  <button type="button" class="election-phase-tab-btn" data-election-phase-tab="election-phase-tab-presidental" role="tab" aria-selected="false">Presidential election</button>
+                  <button type="button" class="election-phase-tab-btn" data-election-phase-tab="election-phase-tab-local" role="tab" aria-selected="false">Local elections</button>
+                </div>
+                <div id="election-phase-tab-parliamentary" class="election-phase-tab-panel active" role="tabpanel">
+                  <div class="parliamentary-phase-selector">
+                    <div id="parliamentaryPhaseLabel" class="parliamentary-phase-label">Select parliamentary election phase</div>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="parliamentary-phase" data-parliamentary-phase="preparationPhase" />
+                      <span id="parliamentaryPhasePreparationLabel">Preparation</span>
+                    </label>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="parliamentary-phase" data-parliamentary-phase="electionDay" />
+                      <span id="parliamentaryPhaseElectionDayLabel">Election Day</span>
+                    </label>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="parliamentary-phase" data-parliamentary-phase="repeatedElections" />
+                      <span id="parliamentaryPhaseRepeatedLabel">Repeated Election</span>
+                    </label>
+                  </div>
+                </div>
+                <div id="election-phase-tab-presidental" class="election-phase-tab-panel" role="tabpanel">
+                  <div class="presidental-phase-selector">
+                    <div id="presidentalPhaseLabel" class="parliamentary-phase-label">Select presidential election phase</div>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="presidental-phase" data-presidental-phase="preparation" />
+                      <span id="presidentalPhasePreparationLabel">Preparation</span>
+                    </label>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="presidental-phase" data-presidental-phase="firstRoundElectionDay" />
+                      <span id="presidentalPhaseFirstRoundElectionDayLabel">First round - election day</span>
+                    </label>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="presidental-phase" data-presidental-phase="firstroundRepededElections" />
+                      <span id="presidentalPhaseFirstRoundRepeatedLabel">First round - repeated elections</span>
+                    </label>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="presidental-phase" data-presidental-phase="secondRoudelectionDay" />
+                      <span id="presidentalPhaseSecondRoundElectionDayLabel">Second round - election day</span>
+                    </label>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="presidental-phase" data-presidental-phase="secondRoundRepeetadelections" />
+                      <span id="presidentalPhaseSecondRoundRepeatedLabel">Second round - repeated elections</span>
+                    </label>
+                  </div>
+                </div>
+                <div id="election-phase-tab-local" class="election-phase-tab-panel" role="tabpanel">
+                  <div class="parliamentary-phase-selector">
+                    <div id="localPhaseLabel" class="parliamentary-phase-label">Select local election phase</div>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="local-phase" data-local-phase="preparationPhase" />
+                      <span id="localPhasePreparationLabel">Preparation</span>
+                    </label>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="local-phase" data-local-phase="electionDay" />
+                      <span id="localPhaseElectionDayLabel">Election Day</span>
+                    </label>
+                    <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="local-phase" data-local-phase="repeatedElections" />
+                      <span id="localPhaseRepeatedLabel">Repeated Election</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

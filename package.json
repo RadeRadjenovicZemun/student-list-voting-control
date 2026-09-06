@@ -1,0 +1,12 @@
+{
+  "name": "signal-vote-dashboard",
+  "version": "1.0.0",
+  "description": "Starter local dashboard for templated Signal group voting data",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
