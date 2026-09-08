@@ -1877,65 +1877,83 @@
           return `<td class="numeric-cell${className ? ` ${className}` : ''}">${content}</td>`;
         }
 
-        regions.forEach(region => {
-          // region row
+        // lazy-build helpers: only construct child rows the first time a node is expanded,
+        // instead of building the full 8000+ row tree up front.
+        function createPlaceRow(place, parentId) {
+          const placeRow = el('tr');
+          placeRow.className = 'place-row hidden-row';
+          placeRow.dataset.parent = parentId;
+          placeRow.dataset.id = `place-${place.id}`;
+          placeRow.innerHTML = `<td>${place.name}</td><td><span id="place-registered-${place.id}">${place.registeredVoters || 0}</span></td>${numericCell(`<span id="place-in-place-${place.id}">0</span>`)}${numericCell(`<span id="place-from-home-${place.id}">0</span>`)}${numericCell(`<span id="place-total-${place.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="place-percent-${place.id}">0%</span>`, 'turnout-percent-cell')}${activityCell(place.senderStatus)}`;
+          return placeRow;
+        }
+
+        function attachLazyToggle(row, buildChildren) {
+          const btn = row.querySelector('.collapse-btn');
+          if (!btn) return;
+          btn.addEventListener('click', () => {
+            const expanded = btn.dataset.expanded === '1';
+            const show = !expanded;
+            btn.dataset.expanded = show ? '1' : '0';
+            btn.textContent = show ? '▼' : '▶';
+            if (show && buildChildren && !row.dataset.built) {
+              row.dataset.built = '1';
+              const childRows = buildChildren() || [];
+              if (childRows.length) row.after(...childRows);
+            }
+            toggleChildren(row.dataset.id, show);
+          });
+        }
+
+        function createMunRow(region, mun) {
+          const munId = `mun-${region.id}-${mun.id}`;
+          const munRow = el('tr');
+          munRow.className = 'mun-row hidden-row';
+          munRow.dataset.parent = `region-${region.id}`;
+          munRow.dataset.id = munId;
+          munRow.innerHTML = `<td><button class="collapse-btn" data-target="${munId}">▶</button> ${mun.name}</td><td id="mun-registered-${region.id}-${mun.id}">${formatRegisteredWithRik(mun.totalMunicipalityRegisteredVoters, mun.RIK_totalMunicipalityRegisteredVoters)}</td>${numericCell(`<span id="mun-in-place-${region.id}-${mun.id}">0</span>`)}${numericCell(`<span id="mun-from-home-${region.id}-${mun.id}">0</span>`)}${numericCell(`<span id="mun-total-${region.id}-${mun.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="mun-percent-${region.id}-${mun.id}">0%</span>`, 'turnout-percent-cell')}<td></td>`;
+          attachLazyToggle(munRow, () => (mun.places || []).map(place => createPlaceRow(place, munId)));
+          return munRow;
+        }
+
+        function createPlaceGroupRow(region, place) {
+          const groupId = `mun-${region.id}-${place.id}`;
+          const parentRow = el('tr');
+          parentRow.className = 'mun-row hidden-row';
+          parentRow.dataset.parent = `region-${region.id}`;
+          parentRow.dataset.id = groupId;
+          parentRow.innerHTML = `<td><button class="collapse-btn" data-target="${groupId}">▶</button> ${place.name}</td><td></td>${numericCell('')}${numericCell('')}${numericCell('', 'turnout-total-cell')}${numericCell('', 'turnout-percent-cell')}<td></td>`;
+          attachLazyToggle(parentRow, () => (place.subPlaces || []).map(sub => createPlaceRow(sub, groupId)));
+          return parentRow;
+        }
+
+        function createRegionRow(region) {
+          const regionId = `region-${region.id}`;
           const regionRow = el('tr');
           regionRow.className = 'region-row';
-          regionRow.dataset.id = `region-${region.id}`;
-          regionRow.innerHTML = `<td><button class="collapse-btn" data-target="region-${region.id}">▶</button> <strong>${region.name}</strong></td><td id="region-registered-${region.id}">${formatRegisteredWithRik(region.totalRegionRegisteredVoters, region.RIK_totalRegionRegisteredVoters)}</td>${numericCell(`<span id="region-in-place-${region.id}">0</span>`)}${numericCell(`<span id="region-from-home-${region.id}">0</span>`)}${numericCell(`<span id="region-total-${region.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="region-percent-${region.id}">0%</span>`, 'turnout-percent-cell')}<td></td>`;
-          tbody.appendChild(regionRow);
-
-          // municipalities
-          if (Array.isArray(region.municipalities) && region.municipalities.length) {
-            region.municipalities.forEach(mun => {
-              const munRow = el('tr');
-              munRow.className = 'mun-row hidden-row';
-              munRow.dataset.parent = `region-${region.id}`;
-              munRow.dataset.id = `mun-${region.id}-${mun.id}`;
-              munRow.innerHTML = `<td><button class="collapse-btn" data-target="mun-${region.id}-${mun.id}">▶</button> ${mun.name}</td><td id="mun-registered-${region.id}-${mun.id}">${formatRegisteredWithRik(mun.totalMunicipalityRegisteredVoters, mun.RIK_totalMunicipalityRegisteredVoters)}</td>${numericCell(`<span id="mun-in-place-${region.id}-${mun.id}">0</span>`)}${numericCell(`<span id="mun-from-home-${region.id}-${mun.id}">0</span>`)}${numericCell(`<span id="mun-total-${region.id}-${mun.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="mun-percent-${region.id}-${mun.id}">0%</span>`, 'turnout-percent-cell')}<td></td>`;
-              tbody.appendChild(munRow);
-
-              (mun.places || []).forEach(place => {
-                const placeRow = el('tr');
-                placeRow.className = 'place-row hidden-row';
-                placeRow.dataset.parent = `mun-${region.id}-${mun.id}`;
-                placeRow.dataset.id = `place-${place.id}`;
-                placeRow.innerHTML = `<td>${place.name}</td><td><span id="place-registered-${place.id}">${place.registeredVoters || 0}</span></td>${numericCell(`<span id="place-in-place-${place.id}">0</span>`)}${numericCell(`<span id="place-from-home-${place.id}">0</span>`)}${numericCell(`<span id="place-total-${place.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="place-percent-${place.id}">0%</span>`, 'turnout-percent-cell')}${activityCell(place.senderStatus)}`;
-                tbody.appendChild(placeRow);
+          regionRow.dataset.id = regionId;
+          regionRow.innerHTML = `<td><button class="collapse-btn" data-target="${regionId}">▶</button> <strong>${region.name}</strong></td><td id="region-registered-${region.id}">${formatRegisteredWithRik(region.totalRegionRegisteredVoters, region.RIK_totalRegionRegisteredVoters)}</td>${numericCell(`<span id="region-in-place-${region.id}">0</span>`)}${numericCell(`<span id="region-from-home-${region.id}">0</span>`)}${numericCell(`<span id="region-total-${region.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="region-percent-${region.id}">0%</span>`, 'turnout-percent-cell')}<td></td>`;
+          attachLazyToggle(regionRow, () => {
+            const rows = [];
+            if (Array.isArray(region.municipalities) && region.municipalities.length) {
+              region.municipalities.forEach(mun => rows.push(createMunRow(region, mun)));
+            }
+            if (Array.isArray(region.places) && region.places.length) {
+              region.places.forEach(place => {
+                if (Array.isArray(place.subPlaces) && place.subPlaces.length) {
+                  rows.push(createPlaceGroupRow(region, place));
+                } else {
+                  rows.push(createPlaceRow(place, regionId));
+                }
               });
-            });
-          }
+            }
+            return rows;
+          });
+          return regionRow;
+        }
 
-          // direct places (for zavodi or inostranstvo)
-          if (Array.isArray(region.places) && region.places.length) {
-            region.places.forEach(place => {
-              if (Array.isArray(place.subPlaces) && place.subPlaces.length) {
-                // parent row for this place group
-                const parentRow = el('tr');
-                parentRow.className = 'mun-row hidden-row';
-                parentRow.dataset.parent = `region-${region.id}`;
-                parentRow.dataset.id = `mun-${region.id}-${place.id}`;
-                parentRow.innerHTML = `<td><button class="collapse-btn" data-target="mun-${region.id}-${place.id}">▶</button> ${place.name}</td><td></td>${numericCell('')}${numericCell('')}${numericCell('', 'turnout-total-cell')}${numericCell('', 'turnout-percent-cell')}<td></td>`;
-                tbody.appendChild(parentRow);
-
-                place.subPlaces.forEach(sub => {
-                  const placeRow = el('tr');
-                  placeRow.className = 'place-row hidden-row';
-                  placeRow.dataset.parent = `mun-${region.id}-${place.id}`;
-                  placeRow.dataset.id = `place-${sub.id}`;
-                  placeRow.innerHTML = `<td>${sub.name}</td><td><span id="place-registered-${sub.id}">${sub.registeredVoters || 0}</span></td>${numericCell(`<span id="place-in-place-${sub.id}">0</span>`)}${numericCell(`<span id="place-from-home-${sub.id}">0</span>`)}${numericCell(`<span id="place-total-${sub.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="place-percent-${sub.id}">0%</span>`, 'turnout-percent-cell')}${activityCell(sub.senderStatus)}`;
-                  tbody.appendChild(placeRow);
-                });
-              } else {
-                const placeRow = el('tr');
-                placeRow.className = 'place-row hidden-row';
-                placeRow.dataset.parent = `region-${region.id}`;
-              placeRow.dataset.id = `place-${place.id}`;
-              placeRow.innerHTML = `<td>${place.name}</td><td><span id="place-registered-${place.id}">${place.registeredVoters || 0}</span></td>${numericCell(`<span id="place-in-place-${place.id}">0</span>`)}${numericCell(`<span id="place-from-home-${place.id}">0</span>`)}${numericCell(`<span id="place-total-${place.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="place-percent-${place.id}">0%</span>`, 'turnout-percent-cell')}${activityCell(place.senderStatus)}`;
-              tbody.appendChild(placeRow);
-              }
-            });
-          }
+        regions.forEach(region => {
+          tbody.appendChild(createRegionRow(region));
         });
 
         table.appendChild(tbody);
@@ -1986,20 +2004,6 @@
             }
           });
         }
-
-        container.querySelectorAll('.collapse-btn').forEach(btn => {
-          btn.addEventListener('click', (e) => {
-            // ignore the global Pregled button here (it has id pregledBtn)
-            if (btn.id === 'pregledBtn') return;
-            const target = btn.dataset.target;
-            const expanded = btn.dataset.expanded === '1';
-            const show = !expanded;
-            btn.dataset.expanded = show ? '1' : '0';
-            btn.textContent = show ? '▼' : '▶';
-            // toggle direct children and recursively handle deeper levels
-            toggleChildren(target, show);
-          });
-        });
       }
 
       function buildResultsCards(config) {
@@ -2111,61 +2115,83 @@
           return new Array(count).fill('<td></td>').join('');
         }
 
-        regions.forEach((region) => {
+        // lazy-build helpers: only construct child rows the first time a node is expanded,
+        // instead of building the full 8000+ row tree up front.
+        function createPlaceRow(place, parentId) {
+          const placeRow = el('tr');
+          placeRow.className = 'place-row hidden-row';
+          placeRow.dataset.parent = parentId;
+          placeRow.dataset.id = `results-place-${place.id}`;
+          placeRow.innerHTML = `<td>${place.name}</td><td><span id="results-registered-place-${place.id}">${place.registeredVoters || 0}</span></td><td><span id="results-voted-in-place-place-${place.id}">0</span></td><td><span id="results-voted-from-home-place-${place.id}">0</span></td>${candidateCells(`place-${place.id}`)}${activityCell(place.senderStatus)}`;
+          return placeRow;
+        }
+
+        function attachLazyToggle(row, buildChildren) {
+          const btn = row.querySelector('.collapse-btn');
+          if (!btn) return;
+          btn.addEventListener('click', () => {
+            const expanded = btn.dataset.expanded === '1';
+            const show = !expanded;
+            btn.dataset.expanded = show ? '1' : '0';
+            btn.textContent = show ? '▼' : '▶';
+            if (show && buildChildren && !row.dataset.built) {
+              row.dataset.built = '1';
+              const childRows = buildChildren() || [];
+              if (childRows.length) row.after(...childRows);
+            }
+            toggleChildren(row.dataset.id, show);
+          });
+        }
+
+        function createMunRow(region, mun) {
+          const munId = `results-mun-${region.id}-${mun.id}`;
+          const munRow = el('tr');
+          munRow.className = 'mun-row hidden-row';
+          munRow.dataset.parent = `results-region-${region.id}`;
+          munRow.dataset.id = munId;
+          munRow.innerHTML = `<td><button class="collapse-btn" data-target="${munId}">▶</button> ${mun.name}</td><td id="results-registered-mun-${region.id}-${mun.id}">${formatRegisteredWithRik(mun.totalMunicipalityRegisteredVoters, mun.RIK_totalMunicipalityRegisteredVoters)}</td><td><span id="results-voted-in-place-mun-${region.id}-${mun.id}">0</span></td><td><span id="results-voted-from-home-mun-${region.id}-${mun.id}">0</span></td>${candidateCells(`mun-${region.id}-${mun.id}`)}<td></td>`;
+          attachLazyToggle(munRow, () => (mun.places || []).map((place) => createPlaceRow(place, munId)));
+          return munRow;
+        }
+
+        function createPlaceGroupRow(region, place) {
+          const groupId = `results-mun-${region.id}-${place.id}`;
+          const parentRow = el('tr');
+          parentRow.className = 'mun-row hidden-row';
+          parentRow.dataset.parent = `results-region-${region.id}`;
+          parentRow.dataset.id = groupId;
+          parentRow.innerHTML = `<td><button class="collapse-btn" data-target="${groupId}">▶</button> ${place.name}</td>${emptyCells(4 + (candidates.length * 2))}`;
+          attachLazyToggle(parentRow, () => (place.subPlaces || []).map((sub) => createPlaceRow(sub, groupId)));
+          return parentRow;
+        }
+
+        function createRegionRow(region) {
+          const regionId = `results-region-${region.id}`;
           const regionRow = el('tr');
           regionRow.className = 'region-row';
-          regionRow.dataset.id = `results-region-${region.id}`;
-          regionRow.innerHTML = `<td><button class="collapse-btn" data-target="results-region-${region.id}">▶</button> <strong>${region.name}</strong></td><td id="results-registered-region-${region.id}">${formatRegisteredWithRik(region.totalRegionRegisteredVoters, region.RIK_totalRegionRegisteredVoters)}</td><td><span id="results-voted-in-place-region-${region.id}">0</span></td><td><span id="results-voted-from-home-region-${region.id}">0</span></td>${candidateCells(`region-${region.id}`)}<td></td>`;
-          tbody.appendChild(regionRow);
-
-          if (Array.isArray(region.municipalities) && region.municipalities.length) {
-            region.municipalities.forEach((mun) => {
-              const munRow = el('tr');
-              munRow.className = 'mun-row hidden-row';
-              munRow.dataset.parent = `results-region-${region.id}`;
-              munRow.dataset.id = `results-mun-${region.id}-${mun.id}`;
-              munRow.innerHTML = `<td><button class="collapse-btn" data-target="results-mun-${region.id}-${mun.id}">▶</button> ${mun.name}</td><td id="results-registered-mun-${region.id}-${mun.id}">${formatRegisteredWithRik(mun.totalMunicipalityRegisteredVoters, mun.RIK_totalMunicipalityRegisteredVoters)}</td><td><span id="results-voted-in-place-mun-${region.id}-${mun.id}">0</span></td><td><span id="results-voted-from-home-mun-${region.id}-${mun.id}">0</span></td>${candidateCells(`mun-${region.id}-${mun.id}`)}<td></td>`;
-              tbody.appendChild(munRow);
-
-              (mun.places || []).forEach((place) => {
-                const placeRow = el('tr');
-                placeRow.className = 'place-row hidden-row';
-                placeRow.dataset.parent = `results-mun-${region.id}-${mun.id}`;
-                placeRow.dataset.id = `results-place-${place.id}`;
-                placeRow.innerHTML = `<td>${place.name}</td><td><span id="results-registered-place-${place.id}">${place.registeredVoters || 0}</span></td><td><span id="results-voted-in-place-place-${place.id}">0</span></td><td><span id="results-voted-from-home-place-${place.id}">0</span></td>${candidateCells(`place-${place.id}`)}${activityCell(place.senderStatus)}`;
-                tbody.appendChild(placeRow);
+          regionRow.dataset.id = regionId;
+          regionRow.innerHTML = `<td><button class="collapse-btn" data-target="${regionId}">▶</button> <strong>${region.name}</strong></td><td id="results-registered-region-${region.id}">${formatRegisteredWithRik(region.totalRegionRegisteredVoters, region.RIK_totalRegionRegisteredVoters)}</td><td><span id="results-voted-in-place-region-${region.id}">0</span></td><td><span id="results-voted-from-home-region-${region.id}">0</span></td>${candidateCells(`region-${region.id}`)}<td></td>`;
+          attachLazyToggle(regionRow, () => {
+            const rows = [];
+            if (Array.isArray(region.municipalities) && region.municipalities.length) {
+              region.municipalities.forEach((mun) => rows.push(createMunRow(region, mun)));
+            }
+            if (Array.isArray(region.places) && region.places.length) {
+              region.places.forEach((place) => {
+                if (Array.isArray(place.subPlaces) && place.subPlaces.length) {
+                  rows.push(createPlaceGroupRow(region, place));
+                } else {
+                  rows.push(createPlaceRow(place, regionId));
+                }
               });
-            });
-          }
+            }
+            return rows;
+          });
+          return regionRow;
+        }
 
-          if (Array.isArray(region.places) && region.places.length) {
-            region.places.forEach((place) => {
-              if (Array.isArray(place.subPlaces) && place.subPlaces.length) {
-                const parentRow = el('tr');
-                parentRow.className = 'mun-row hidden-row';
-                parentRow.dataset.parent = `results-region-${region.id}`;
-                parentRow.dataset.id = `results-mun-${region.id}-${place.id}`;
-                parentRow.innerHTML = `<td><button class="collapse-btn" data-target="results-mun-${region.id}-${place.id}">▶</button> ${place.name}</td>${emptyCells(4 + (candidates.length * 2))}`;
-                tbody.appendChild(parentRow);
-
-                place.subPlaces.forEach((sub) => {
-                  const placeRow = el('tr');
-                  placeRow.className = 'place-row hidden-row';
-                  placeRow.dataset.parent = `results-mun-${region.id}-${place.id}`;
-                  placeRow.dataset.id = `results-place-${sub.id}`;
-                  placeRow.innerHTML = `<td>${sub.name}</td><td><span id="results-registered-place-${sub.id}">${sub.registeredVoters || 0}</span></td><td><span id="results-voted-in-place-place-${sub.id}">0</span></td><td><span id="results-voted-from-home-place-${sub.id}">0</span></td>${candidateCells(`place-${sub.id}`)}${activityCell(sub.senderStatus)}`;
-                  tbody.appendChild(placeRow);
-                });
-              } else {
-                const placeRow = el('tr');
-                placeRow.className = 'place-row hidden-row';
-                placeRow.dataset.parent = `results-region-${region.id}`;
-                placeRow.dataset.id = `results-place-${place.id}`;
-                placeRow.innerHTML = `<td>${place.name}</td><td><span id="results-registered-place-${place.id}">${place.registeredVoters || 0}</span></td><td><span id="results-voted-in-place-place-${place.id}">0</span></td><td><span id="results-voted-from-home-place-${place.id}">0</span></td>${candidateCells(`place-${place.id}`)}${activityCell(place.senderStatus)}`;
-                tbody.appendChild(placeRow);
-              }
-            });
-          }
+        regions.forEach((region) => {
+          tbody.appendChild(createRegionRow(region));
         });
 
         table.appendChild(tbody);
@@ -2207,18 +2233,6 @@
             }
           });
         }
-
-        container.querySelectorAll('.collapse-btn').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            if (btn.id === 'resultsPregledBtn') return;
-            const target = btn.dataset.target;
-            const expanded = btn.dataset.expanded === '1';
-            const show = !expanded;
-            btn.dataset.expanded = show ? '1' : '0';
-            btn.textContent = show ? '▼' : '▶';
-            toggleChildren(target, show);
-          });
-        });
       }
 
       async function loadResultsSummary() {
