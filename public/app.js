@@ -626,6 +626,46 @@
         }
       });
 
+      const hoverTooltip = document.createElement('div');
+      hoverTooltip.className = 'hover-tooltip';
+      document.body.appendChild(hoverTooltip);
+      let hoverTooltipTarget = null;
+
+      function hideHoverTooltip() {
+        hoverTooltipTarget = null;
+        hoverTooltip.classList.remove('visible');
+      }
+
+      function positionHoverTooltip(event) {
+        const offset = 14;
+        hoverTooltip.style.left = `${event.clientX + offset}px`;
+        hoverTooltip.style.top = `${event.clientY + offset}px`;
+      }
+
+      function attachTooltipDelegation(container) {
+        if (!container) return;
+        container.addEventListener('pointerover', (event) => {
+          const target = event.target.closest('[data-tooltip]');
+          if (!target) return;
+          hoverTooltipTarget = target;
+          hoverTooltip.textContent = target.dataset.tooltip;
+          positionHoverTooltip(event);
+          hoverTooltip.classList.add('visible');
+        });
+        container.addEventListener('pointermove', (event) => {
+          if (hoverTooltipTarget) positionHoverTooltip(event);
+        });
+        container.addEventListener('pointerout', (event) => {
+          if (hoverTooltipTarget && event.target.closest('[data-tooltip]') === hoverTooltipTarget) {
+            hideHoverTooltip();
+          }
+        });
+      }
+
+      attachTooltipDelegation(document.getElementById('resultsTree'));
+      attachTooltipDelegation(document.getElementById('resultsRegionChart'));
+      document.addEventListener('scroll', hideHoverTooltip, true);
+
       document.addEventListener('pointermove', (event) => {
         if (resizingSidebar && appGrid) {
           const gridRect = appGrid.getBoundingClientRect();
@@ -1357,7 +1397,8 @@
         if (rootCandidates.length) {
           return rootCandidates.map((candidate) => ({
             id: String(candidate.id),
-            alias: String(candidate.alias || candidate.name || `ID ${candidate.id}`).trim()
+            alias: String(candidate.alias || candidate.name || `ID ${candidate.id}`).trim(),
+            name: String(candidate.name || candidate.alias || `ID ${candidate.id}`).trim()
           }));
         }
 
@@ -1376,7 +1417,8 @@
             if (candidateVotes.length) {
               return candidateVotes.map((candidate) => ({
                 id: String(candidate.id),
-                alias: String(candidate.alias || candidate.name || `ID ${candidate.id}`).trim()
+                alias: String(candidate.alias || candidate.name || `ID ${candidate.id}`).trim(),
+                name: String(candidate.name || candidate.alias || `ID ${candidate.id}`).trim()
               }));
             }
           }
@@ -2020,7 +2062,7 @@
         table.className = 'regions-table';
         const thead = el('thead');
         const candidateHeaderCells = candidates.map((candidate, index) => (
-          `<th colspan="2" class="group-header candidate-group-header" data-results-candidate="${escapeHtml(candidate.id)}" style="color:${RESULT_CANDIDATE_COLORS[index % RESULT_CANDIDATE_COLORS.length]}">${escapeHtml(candidate.alias)}</th>`
+          `<th colspan="2" class="group-header candidate-group-header" data-results-candidate="${escapeHtml(candidate.id)}" style="color:${RESULT_CANDIDATE_COLORS[index % RESULT_CANDIDATE_COLORS.length]}" data-tooltip="${escapeHtml(candidate.name)}">${escapeHtml(candidate.alias)}</th>`
         )).join('');
         const candidateSubHeaders = candidates.map((candidate) => (
           `<th id="resultsHeaderCandidateNumber-${escapeHtml(candidate.id)}">${locale.tableTurnoutNumber || 'Number'}</th><th id="resultsHeaderCandidatePercent-${escapeHtml(candidate.id)}">${locale.tableTurnoutPercent || 'Percentage'}</th>`
@@ -2029,12 +2071,13 @@
           <tr>
             <th id="resultsHeaderName" rowspan="2" style="width:30%">${locale.tableName || 'Name'}</th>
             <th id="resultsHeaderRegistered" rowspan="2" style="width:10%">${locale.tableRegistered || 'Registered'}</th>
-            <th id="resultsHeaderVotedInPlace" rowspan="2" style="width:11%">${locale.tableVotedInPlace || 'Voted in Place'}</th>
-            <th id="resultsHeaderVotedFromHome" rowspan="2" style="width:11%">${locale.tableVotedFromHome || 'Voted from Home'}</th>
+            <th id="resultsHeaderVoted" colspan="2" class="group-header" style="width:22%">${locale.tableVoted || 'Voted'}</th>
             ${candidateHeaderCells}
             <th id="resultsHeaderControllerActivity" rowspan="2" style="width:10%">${locale.tableControllerActivity || 'Controller Activity'}</th>
           </tr>
           <tr>
+            <th id="resultsHeaderVotedInPlace">${locale.tableVotedInPlace || 'Voted in Place'}</th>
+            <th id="resultsHeaderVotedFromHome">${locale.tableVotedFromHome || 'Voted from Home'}</th>
             ${candidateSubHeaders}
           </tr>`;
         table.appendChild(thead);
@@ -2442,7 +2485,7 @@
               pieStart = pieEnd;
               return `
                 <div class="candidate-result-row">
-                  <div class="candidate-result-name"><span class="candidate-order-number" style="background:${color}">${index + 1}</span><strong style="color:${color}">${escapeHtml(candidate.alias)}</strong></div>
+                  <div class="candidate-result-name"><span class="candidate-order-number" style="background:${color}">${index + 1}</span><strong style="color:${color}" data-tooltip="${escapeHtml(candidate.name)}">${escapeHtml(candidate.alias)}</strong></div>
                   <div class="candidate-result-bar"><div class="candidate-result-fill" style="width:${highestCandidateVotes > 0 ? Math.min(100, (votes / highestCandidateVotes) * 100) : 0}%; background:${color}"></div></div>
                   <div class="candidate-result-meta"><strong>${formatNumber(votes)}</strong><span>${pct.toFixed(2)}%</span></div>
                 </div>`;
@@ -2460,6 +2503,7 @@
             });
             const pieHasVotes = pieCandidates.length > 0;
             let pieLabelStart = 0;
+            const pieSliceRanges = [];
             const pieLabels = pieCandidates.map((candidate) => {
               const votes = Number(candidateTotals.get(String(candidate.id)) || 0);
               const pct = totalCandidateVotes > 0 ? (votes / totalCandidateVotes) * 100 : 0;
@@ -2468,8 +2512,9 @@
               const radius = 36;
               const x = 50 + Math.cos(angle) * radius;
               const y = 50 + Math.sin(angle) * radius;
+              pieSliceRanges.push({ start: pieLabelStart, end: pieLabelStart + pct, name: candidate.name });
               pieLabelStart += pct;
-              return `<span class="candidate-results-pie-label" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%">${escapeHtml(candidate.alias)}<small>${pct.toFixed(2)}%</small></span>`;
+              return `<span class="candidate-results-pie-label" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%" data-tooltip="${escapeHtml(candidate.name)}">${escapeHtml(candidate.alias)}<small>${pct.toFixed(2)}%</small></span>`;
             }).join('');
             resultsRows.innerHTML = `
               <div class="candidate-results-layout">
@@ -2481,6 +2526,29 @@
               </div>`;
             const chartLayout = resultsRows.querySelector('.candidate-results-layout');
             const splitter = resultsRows.querySelector('.candidate-results-splitter');
+            const pieEl = resultsRows.querySelector('.candidate-results-pie');
+            if (pieEl && pieHasVotes) {
+              pieEl.addEventListener('pointermove', (event) => {
+                const rect = pieEl.getBoundingClientRect();
+                const dx = event.clientX - rect.left - rect.width / 2;
+                const dy = event.clientY - rect.top - rect.height / 2;
+                const radius = Math.min(rect.width, rect.height) / 2;
+                if (Math.sqrt((dx * dx) + (dy * dy)) > radius) {
+                  hideHoverTooltip();
+                  return;
+                }
+                let angle = Math.atan2(dy, dx) + (Math.PI / 2);
+                if (angle < 0) angle += Math.PI * 2;
+                const pct = (angle / (Math.PI * 2)) * 100;
+                const slice = pieSliceRanges.find((range) => pct >= range.start && pct < range.end) || pieSliceRanges[pieSliceRanges.length - 1];
+                if (slice) {
+                  hoverTooltip.textContent = slice.name;
+                  positionHoverTooltip(event);
+                  hoverTooltip.classList.add('visible');
+                }
+              });
+              pieEl.addEventListener('pointerleave', hideHoverTooltip);
+            }
             const applyChartSplit = () => {
               if (chartLayout) chartLayout.style.gridTemplateColumns = `${resultsChartSplitRatio}fr 8px ${1 - resultsChartSplitRatio}fr`;
             };

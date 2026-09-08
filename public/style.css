@@ -12,6 +12,24 @@
       }
       /* layout */
       .app-grid { display: flex; height: 100vh; }
+      .hover-tooltip {
+        position: fixed;
+        z-index: 10000;
+        pointer-events: none;
+        background: #0f172a;
+        color: #f8fafc;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 4px 8px;
+        border-radius: 4px;
+        white-space: nowrap;
+        opacity: 0;
+        visibility: hidden;
+      }
+      .hover-tooltip.visible {
+        opacity: 1;
+        visibility: visible;
+      }
       .sidebar {
         position: sticky;
         top: 0;
@@ -936,6 +954,31 @@
         border-bottom-color: transparent;
       }
       .regions-table thead tr:first-child #tableHeaderTurnout::after {
+        content: "";
+        position: absolute;
+        left: 2.5%;
+        right: 2.5%;
+        bottom: 0;
+        height: 1px;
+        background: #dbe3ee;
+      }
+      .regions-table thead tr:first-child #resultsHeaderVoted {
+        position: relative;
+        border-bottom-color: transparent;
+      }
+      .regions-table thead tr:first-child #resultsHeaderVoted::after {
+        content: "";
+        position: absolute;
+        left: 2.5%;
+        right: 2.5%;
+        bottom: 0;
+        height: 1px;
+        background: #dbe3ee;
+      }
+      .regions-table thead tr:first-child th.candidate-group-header {
+        position: relative;
+      }
+      .regions-table thead tr:first-child th.candidate-group-header::after {
         content: "";
         position: absolute;
         left: 2.5%;
