@@ -914,9 +914,35 @@
       .regions-table thead th { text-align: left; padding: 8px 10px; background: #f8fafc; border-bottom: 1px solid #e6eef6; }
       .regions-table thead tr:first-child th.group-header {
         text-align: center;
-        border-bottom: 1px solid #dbe3ee;
+        border-bottom: 1px solid transparent;
         padding-bottom: 10px;
         font-weight: 700;
+      }
+      .regions-table thead tr:first-child #tableHeaderVoted {
+        position: relative;
+        border-bottom-color: transparent;
+      }
+      .regions-table thead tr:first-child #tableHeaderVoted::after {
+        content: "";
+        position: absolute;
+        left: 2.5%;
+        right: 2.5%;
+        bottom: 0;
+        height: 1px;
+        background: #dbe3ee;
+      }
+      .regions-table thead tr:first-child #tableHeaderTurnout {
+        position: relative;
+        border-bottom-color: transparent;
+      }
+      .regions-table thead tr:first-child #tableHeaderTurnout::after {
+        content: "";
+        position: absolute;
+        left: 2.5%;
+        right: 2.5%;
+        bottom: 0;
+        height: 1px;
+        background: #dbe3ee;
       }
       .regions-table thead tr:nth-child(2) th {
         text-align: center;
@@ -927,6 +953,27 @@
         text-align: center;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
+      }
+      .registered-count-stack {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+        line-height: 1.2;
+        font-variant-numeric: tabular-nums;
+      }
+      .registered-count-main {
+        color: #0f172a;
+        font-weight: 700;
+      }
+      .registered-count-rik {
+        color: #64748b;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .registered-count-source {
+        color: #94a3b8;
+        font-weight: 600;
       }
       .regions-table tbody td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; }
       .collapse-btn { border: none; background: transparent; cursor: pointer; font-size: 16px; margin-right:6px; width:20px; display:inline-block; text-align:center; color:#0f172a; }
@@ -1146,8 +1193,27 @@
       .region-chart .region-row-chart { display:flex; align-items:center; gap:12px; padding:6px 0; }
       .region-chart .region-label { width:180px; font-weight:600; }
       .region-chart .bar { flex:1; background:#f1f5f9; height:14px; border-radius:8px; overflow:hidden; }
-      .region-chart .fill { height:100%; background: linear-gradient(90deg,#2563eb,#60a5fa); }
+      .region-chart .fill { height:100%; background:linear-gradient(90deg,#2563eb,#60a5fa); }
       .region-chart .meta { width:140px; text-align:right; font-weight:600; }
+      .candidate-results-layout { display:grid; grid-template-columns:1fr 8px 2fr; gap:28px; align-items:center; }
+      .results-region-filter { display:flex; align-items:center; gap:10px; margin:4px 0 16px; font-size:13px; font-weight:700; color:#334155; }
+      .results-region-filter select { min-width:220px; padding:7px 10px; border:1px solid #cbd5e1; border-radius:7px; background:#fff; color:#0f172a; }
+      .candidate-results-bars { display:grid; gap:14px; }
+      .candidate-result-row { display:grid; grid-template-columns:minmax(110px, 1fr) minmax(60px, 1.2fr) 110px; align-items:center; gap:12px; min-height:24px; }
+      .candidate-result-name { display:flex; align-items:center; gap:8px; min-width:0; }
+      .candidate-result-name strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .candidate-order-number { display:inline-flex; flex:0 0 22px; width:22px; height:22px; align-items:center; justify-content:center; border-radius:50%; color:#fff; font-size:12px; font-weight:700; }
+      .candidate-result-bar { height:16px; background:#eef2f7; border-radius:999px; overflow:hidden; }
+      .candidate-result-fill { height:100%; min-width:0; border-radius:inherit; transition:width 0.25s ease; }
+      .candidate-result-meta { display:flex; justify-content:flex-end; align-items:baseline; gap:8px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+      .candidate-result-meta span { color:#64748b; font-size:12px; font-weight:600; }
+      .candidate-results-splitter { align-self:stretch; min-height:220px; width:8px; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; border-radius:2px; cursor:col-resize; touch-action:none; transition:background 0.15s ease, border-color 0.15s ease; }
+      .candidate-results-splitter:hover, .candidate-results-splitter:focus-visible { background:#dbeafe; border-color:#2563eb; outline:none; }
+      .candidate-results-pie-panel { display:flex; align-items:center; justify-content:center; min-height:220px; width:100%; }
+      .candidate-results-pie { position:relative; width:min(100%, 560px); aspect-ratio:1; border-radius:50%; box-shadow:inset 0 0 0 1px rgba(15,23,42,0.08); }
+      .candidate-results-pie-label { position:absolute; display:flex; flex-direction:column; align-items:center; justify-content:center; max-width:22%; transform:translate(-50%, -50%); color:#fff; font-size:clamp(9px, 1.1vw, 14px); font-weight:800; line-height:1.05; text-align:center; text-shadow:0 1px 2px rgba(15,23,42,0.85); pointer-events:none; overflow-wrap:anywhere; }
+      .candidate-results-pie-label small { margin-top:3px; font-size:0.85em; font-weight:700; }
+      .candidate-results-pie.empty { display:flex; align-items:center; justify-content:center; background:#fff; border:1px solid #94a3b8; box-shadow:none; color:#64748b; font-size:16px; font-weight:700; }
       .region-chart.collapsed .region-chart-rows { display:none; }
       .results-content .tree-container {
         overflow-x: auto;
@@ -1185,6 +1251,17 @@
       }
       .results-tab-panel.active {
         display: block;
+      }
+
+      @media (max-width: 800px) {
+        .candidate-results-layout { grid-template-columns:1fr; }
+        .candidate-results-splitter { display:none; }
+        .candidate-results-pie-panel { min-height:180px; }
+      }
+
+      @media (max-width: 600px) {
+        .candidate-result-row { grid-template-columns: minmax(110px, 0.8fr) minmax(60px, 1fr) 82px; gap:8px; }
+        .candidate-result-meta { gap:4px; font-size:12px; }
       }
 
       form { display: grid; gap: 10px; margin-top: 8px; }

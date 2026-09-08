@@ -22,6 +22,9 @@
       let coverageTimelineResolutionMinutes = 15;
       let coverageConfigVersionToken = null;
       let coverageTimelineSnapshots = [];
+      let resultsChartSplitRatio = 1 / 3;
+      let selectedResultsRegionId = 'ALL';
+      const RESULT_CANDIDATE_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#475569'];
       const COVERAGE_STATUS_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0f766e', '#ea580c', '#475569'];
 
       function getLanguageConfig(config, language = activeLanguage) {
@@ -230,6 +233,8 @@
         // Data Base tab labels
         const dbClearDataBtn = document.getElementById('dbClearDataBtn');
         if (dbClearDataBtn) dbClearDataBtn.textContent = locale.dbClearDataBtn || 'Clear Data';
+        const dbClearRawMessagesLabel = document.getElementById('dbClearRawMessagesLabel');
+        if (dbClearRawMessagesLabel) dbClearRawMessagesLabel.textContent = locale.dbClearRawMessagesLabel || 'Delete All Raw Messages';
         const dbClearAllLabel = document.getElementById('dbClearAllLabel');
         if (dbClearAllLabel) dbClearAllLabel.textContent = locale.signalFilterAll || 'ALL';
         const dbClearSenderLabel = document.getElementById('dbClearSenderLabel');
@@ -1225,6 +1230,14 @@
       }
 
       function formatNumber(n) { return Intl.NumberFormat('de-DE').format(Number(n || 0)); }
+      function formatRegisteredWithRik(count, rikCount, locale = getLocaleDictionary()) {
+        const value = Number(count || 0);
+        const rikValue = rikCount != null && Number(rikCount) > 0 ? Number(rikCount) : null;
+        if (rikValue == null) {
+          return `<span class="registered-count-stack"><span class="registered-count-main">${formatNumber(value)}</span></span>`;
+        }
+        return `<span class="registered-count-stack"><span class="registered-count-main">${formatNumber(value)}</span><span class="registered-count-rik">${formatNumber(rikValue)} <span class="registered-count-source">${locale.rikSource || 'Source RIK'}</span></span></span>`;
+      }
       function escapeHtml(value) {
         return String(value || '')
           .replace(/&/g, '&amp;')
@@ -1344,16 +1357,31 @@
         if (rootCandidates.length) {
           return rootCandidates.map((candidate) => ({
             id: String(candidate.id),
-            name: String(candidate.name || `ID ${candidate.id}`).trim()
+            alias: String(candidate.alias || candidate.name || `ID ${candidate.id}`).trim()
           }));
         }
 
-        const firstPlace = collectVotingPlaces(config || {}).find((place) => Array.isArray(place && place.result && place.result.candidateVotes));
-        if (!firstPlace) return [];
-        return firstPlace.result.candidateVotes.map((candidate) => ({
-          id: String(candidate.id),
-          name: String(candidate.name || `ID ${candidate.id}`).trim()
-        }));
+        const regions = getRegions(config);
+        for (const region of regions) {
+          const places = [];
+          (region.municipalities || []).forEach((municipality) => places.push(...(municipality.places || [])));
+          (region.places || []).forEach((place) => {
+            if (Array.isArray(place.subPlaces) && place.subPlaces.length) places.push(...place.subPlaces);
+            else places.push(place);
+          });
+          for (const place of places) {
+            const candidateVotes = Array.isArray(place && place.result && place.result.candidateVotes)
+              ? place.result.candidateVotes
+              : [];
+            if (candidateVotes.length) {
+              return candidateVotes.map((candidate) => ({
+                id: String(candidate.id),
+                alias: String(candidate.alias || candidate.name || `ID ${candidate.id}`).trim()
+              }));
+            }
+          }
+        }
+        return [];
       }
 
       function getResultVotesMap(place, candidateIds) {
@@ -1794,6 +1822,15 @@
           return `<td><span class="ctrl-status ctrl-status-${s}">${label}</span></td>`;
         }
 
+        function formatRegisteredWithRik(count, rikCount) {
+          const value = Number(count || 0);
+          const rikValue = rikCount != null && Number(rikCount) > 0 ? Number(rikCount) : null;
+          if (rikValue == null) {
+            return `<span class="registered-count-stack"><span class="registered-count-main">${formatNumber(value)}</span></span>`;
+          }
+          return `<span class="registered-count-stack"><span class="registered-count-main">${formatNumber(value)}</span><span class="registered-count-rik">${formatNumber(rikValue)} <span class="registered-count-source">${locale.rikSource || 'Source RIK'}</span></span></span>`;
+        }
+
         function numericCell(content, className = '') {
           return `<td class="numeric-cell${className ? ` ${className}` : ''}">${content}</td>`;
         }
@@ -1803,7 +1840,7 @@
           const regionRow = el('tr');
           regionRow.className = 'region-row';
           regionRow.dataset.id = `region-${region.id}`;
-          regionRow.innerHTML = `<td><button class="collapse-btn" data-target="region-${region.id}">▶</button> <strong>${region.name}</strong></td><td><span id="region-registered-${region.id}">0</span></td>${numericCell(`<span id="region-in-place-${region.id}">0</span>`)}${numericCell(`<span id="region-from-home-${region.id}">0</span>`)}${numericCell(`<span id="region-total-${region.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="region-percent-${region.id}">0%</span>`, 'turnout-percent-cell')}<td></td>`;
+          regionRow.innerHTML = `<td><button class="collapse-btn" data-target="region-${region.id}">▶</button> <strong>${region.name}</strong></td><td id="region-registered-${region.id}">${formatRegisteredWithRik(region.totalRegionRegisteredVoters, region.RIK_totalRegionRegisteredVoters)}</td>${numericCell(`<span id="region-in-place-${region.id}">0</span>`)}${numericCell(`<span id="region-from-home-${region.id}">0</span>`)}${numericCell(`<span id="region-total-${region.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="region-percent-${region.id}">0%</span>`, 'turnout-percent-cell')}<td></td>`;
           tbody.appendChild(regionRow);
 
           // municipalities
@@ -1813,7 +1850,7 @@
               munRow.className = 'mun-row hidden-row';
               munRow.dataset.parent = `region-${region.id}`;
               munRow.dataset.id = `mun-${region.id}-${mun.id}`;
-              munRow.innerHTML = `<td><button class="collapse-btn" data-target="mun-${region.id}-${mun.id}">▶</button> ${mun.name}</td><td><span id="mun-registered-${region.id}-${mun.id}">0</span></td>${numericCell(`<span id="mun-in-place-${region.id}-${mun.id}">0</span>`)}${numericCell(`<span id="mun-from-home-${region.id}-${mun.id}">0</span>`)}${numericCell(`<span id="mun-total-${region.id}-${mun.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="mun-percent-${region.id}-${mun.id}">0%</span>`, 'turnout-percent-cell')}<td></td>`;
+              munRow.innerHTML = `<td><button class="collapse-btn" data-target="mun-${region.id}-${mun.id}">▶</button> ${mun.name}</td><td id="mun-registered-${region.id}-${mun.id}">${formatRegisteredWithRik(mun.totalMunicipalityRegisteredVoters, mun.RIK_totalMunicipalityRegisteredVoters)}</td>${numericCell(`<span id="mun-in-place-${region.id}-${mun.id}">0</span>`)}${numericCell(`<span id="mun-from-home-${region.id}-${mun.id}">0</span>`)}${numericCell(`<span id="mun-total-${region.id}-${mun.id}">0</span>`, 'turnout-total-cell')}${numericCell(`<span id="mun-percent-${region.id}-${mun.id}">0%</span>`, 'turnout-percent-cell')}<td></td>`;
               tbody.appendChild(munRow);
 
               (mun.places || []).forEach(place => {
@@ -1982,8 +2019,8 @@
         const table = el('table');
         table.className = 'regions-table';
         const thead = el('thead');
-        const candidateHeaderCells = candidates.map((candidate) => (
-          `<th colspan="2" class="group-header candidate-group-header" data-results-candidate="${escapeHtml(candidate.id)}">${escapeHtml(candidate.name)}</th>`
+        const candidateHeaderCells = candidates.map((candidate, index) => (
+          `<th colspan="2" class="group-header candidate-group-header" data-results-candidate="${escapeHtml(candidate.id)}" style="color:${RESULT_CANDIDATE_COLORS[index % RESULT_CANDIDATE_COLORS.length]}">${escapeHtml(candidate.alias)}</th>`
         )).join('');
         const candidateSubHeaders = candidates.map((candidate) => (
           `<th id="resultsHeaderCandidateNumber-${escapeHtml(candidate.id)}">${locale.tableTurnoutNumber || 'Number'}</th><th id="resultsHeaderCandidatePercent-${escapeHtml(candidate.id)}">${locale.tableTurnoutPercent || 'Percentage'}</th>`
@@ -2018,6 +2055,15 @@
           }).join('');
         }
 
+        function formatRegisteredWithRik(count, rikCount) {
+          const value = Number(count || 0);
+          const rikValue = rikCount != null && Number(rikCount) > 0 ? Number(rikCount) : null;
+          if (rikValue == null) {
+            return `<span class="registered-count-stack"><span class="registered-count-main">${formatNumber(value)}</span></span>`;
+          }
+          return `<span class="registered-count-stack"><span class="registered-count-main">${formatNumber(value)}</span><span class="registered-count-rik">${formatNumber(rikValue)} <span class="registered-count-source">${locale.rikSource || 'Source RIK'}</span></span></span>`;
+        }
+
         function emptyCells(count) {
           return new Array(count).fill('<td></td>').join('');
         }
@@ -2026,7 +2072,7 @@
           const regionRow = el('tr');
           regionRow.className = 'region-row';
           regionRow.dataset.id = `results-region-${region.id}`;
-          regionRow.innerHTML = `<td><button class="collapse-btn" data-target="results-region-${region.id}">▶</button> <strong>${region.name}</strong></td><td><span id="results-registered-region-${region.id}">0</span></td><td><span id="results-voted-in-place-region-${region.id}">0</span></td><td><span id="results-voted-from-home-region-${region.id}">0</span></td>${candidateCells(`region-${region.id}`)}<td></td>`;
+          regionRow.innerHTML = `<td><button class="collapse-btn" data-target="results-region-${region.id}">▶</button> <strong>${region.name}</strong></td><td id="results-registered-region-${region.id}">${formatRegisteredWithRik(region.totalRegionRegisteredVoters, region.RIK_totalRegionRegisteredVoters)}</td><td><span id="results-voted-in-place-region-${region.id}">0</span></td><td><span id="results-voted-from-home-region-${region.id}">0</span></td>${candidateCells(`region-${region.id}`)}<td></td>`;
           tbody.appendChild(regionRow);
 
           if (Array.isArray(region.municipalities) && region.municipalities.length) {
@@ -2035,7 +2081,7 @@
               munRow.className = 'mun-row hidden-row';
               munRow.dataset.parent = `results-region-${region.id}`;
               munRow.dataset.id = `results-mun-${region.id}-${mun.id}`;
-              munRow.innerHTML = `<td><button class="collapse-btn" data-target="results-mun-${region.id}-${mun.id}">▶</button> ${mun.name}</td><td><span id="results-registered-mun-${region.id}-${mun.id}">0</span></td><td><span id="results-voted-in-place-mun-${region.id}-${mun.id}">0</span></td><td><span id="results-voted-from-home-mun-${region.id}-${mun.id}">0</span></td>${candidateCells(`mun-${region.id}-${mun.id}`)}<td></td>`;
+              munRow.innerHTML = `<td><button class="collapse-btn" data-target="results-mun-${region.id}-${mun.id}">▶</button> ${mun.name}</td><td id="results-registered-mun-${region.id}-${mun.id}">${formatRegisteredWithRik(mun.totalMunicipalityRegisteredVoters, mun.RIK_totalMunicipalityRegisteredVoters)}</td><td><span id="results-voted-in-place-mun-${region.id}-${mun.id}">0</span></td><td><span id="results-voted-from-home-mun-${region.id}-${mun.id}">0</span></td>${candidateCells(`mun-${region.id}-${mun.id}`)}<td></td>`;
               tbody.appendChild(munRow);
 
               (mun.places || []).forEach((place) => {
@@ -2340,40 +2386,125 @@
           const resultsChart = document.getElementById('resultsRegionChart');
           const resultsRows = document.getElementById('resultsRegionChartRows');
           if (resultsChart && resultsRows) {
-            resultsRows.innerHTML = '';
-            regions.forEach((region) => {
-              let regSum = 0;
-              let regionResultSum = 0;
-              if (Array.isArray(region.municipalities)) {
-                region.municipalities.forEach((mun) => {
-                  (mun.places || []).forEach((place) => {
-                    regSum += Number(place.registeredVoters || 0);
-                    regionResultSum += getResultStats(place, candidateIds).total;
-                  });
+            const resultsRegionSelect = document.getElementById('resultsRegionSelect');
+            if (resultsRegionSelect) {
+              const options = ['<option value="ALL">ALL</option>'].concat(regions.map((region) => `<option value="${escapeHtml(region.id)}">${escapeHtml(region.name)}</option>`));
+              if (resultsRegionSelect.innerHTML !== options.join('')) resultsRegionSelect.innerHTML = options.join('');
+              resultsRegionSelect.value = selectedResultsRegionId;
+              if (!resultsRegionSelect.dataset.bound) {
+                resultsRegionSelect.dataset.bound = '1';
+                resultsRegionSelect.addEventListener('change', () => {
+                  selectedResultsRegionId = resultsRegionSelect.value || 'ALL';
+                  globalThis.loadResultsSummary?.();
                 });
               }
-              if (Array.isArray(region.places)) {
-                region.places.forEach((place) => {
-                  if (Array.isArray(place.subPlaces)) {
-                    place.subPlaces.forEach((sub) => {
-                      regSum += Number(sub.registeredVoters || 0);
-                      regionResultSum += getResultStats(sub, candidateIds).total;
-                    });
-                  } else {
-                    regSum += Number(place.registeredVoters || 0);
-                    regionResultSum += getResultStats(place, candidateIds).total;
-                  }
+            }
+
+            const selectedScope = selectedResultsRegionId === 'ALL'
+              ? cachedConfig
+              : regions.find((region) => String(region.id) === String(selectedResultsRegionId));
+            const candidateTotals = new Map(candidateIds.map((candidateId) => [candidateId, 0]));
+            const scopeCandidateVotes = selectedScope && selectedScope.result && Array.isArray(selectedScope.result.candidateVotes)
+              ? selectedScope.result.candidateVotes
+              : [];
+            const scopeCandidateTotal = scopeCandidateVotes.reduce((total, candidate) => total + Number(candidate.votes || 0), 0);
+            if (scopeCandidateVotes.length && scopeCandidateTotal > 0) {
+              scopeCandidateVotes.forEach((candidate) => {
+                if (candidateTotals.has(String(candidate.id))) candidateTotals.set(String(candidate.id), Number(candidate.votes || 0));
+              });
+            } else {
+              const addPlaceResults = (place) => {
+                sumVoteMap(candidateTotals, getResultStats(place, candidateIds).votes);
+              };
+              (selectedScope ? [selectedScope] : regions).forEach((region) => {
+                (region.municipalities || []).forEach((mun) => (mun.places || []).forEach(addPlaceResults));
+                (region.places || []).forEach((place) => {
+                  if (Array.isArray(place.subPlaces) && place.subPlaces.length) place.subPlaces.forEach(addPlaceResults);
+                  else addPlaceResults(place);
                 });
-              }
-              const pct = regSum > 0 ? (Number(regionResultSum) / Number(regSum)) * 100 : 0;
-              const row = el('div', 'region-row-chart');
-              row.innerHTML = `
-                <div class="region-label">${region.name}</div>
-                <div class="bar"><div class="fill" style="width:${Math.min(100, pct)}%"></div></div>
-                <div class="meta">${formatNumber(regionResultSum)} / ${formatNumber(regSum)} (${pct.toFixed(2)}%)</div>
-              `;
-              resultsRows.appendChild(row);
+              });
+            }
+
+            const totalCandidateVotes = candidateIds.reduce(
+              (total, candidateId) => total + Number(candidateTotals.get(candidateId) || 0),
+              0
+            );
+            const highestCandidateVotes = Math.max(...candidateIds.map((candidateId) => Number(candidateTotals.get(candidateId) || 0)), 0);
+            const candidateColors = RESULT_CANDIDATE_COLORS;
+            let pieStart = 0;
+            const pieStops = [];
+            const candidateRows = candidateDefinitions.map((candidate, index) => {
+              const votes = Number(candidateTotals.get(String(candidate.id)) || 0);
+              const pct = totalCandidateVotes > 0 ? (votes / totalCandidateVotes) * 100 : 0;
+              const color = candidateColors[index % candidateColors.length];
+              const pieEnd = pieStart + pct;
+              pieStops.push(`${color} ${pieStart}% ${pieEnd}%`);
+              pieStart = pieEnd;
+              return `
+                <div class="candidate-result-row">
+                  <div class="candidate-result-name"><span class="candidate-order-number" style="background:${color}">${index + 1}</span><strong style="color:${color}">${escapeHtml(candidate.alias)}</strong></div>
+                  <div class="candidate-result-bar"><div class="candidate-result-fill" style="width:${highestCandidateVotes > 0 ? Math.min(100, (votes / highestCandidateVotes) * 100) : 0}%; background:${color}"></div></div>
+                  <div class="candidate-result-meta"><strong>${formatNumber(votes)}</strong><span>${pct.toFixed(2)}%</span></div>
+                </div>`;
+            }).join('');
+            const pieCandidates = candidateDefinitions.filter((candidate) => Number(candidateTotals.get(String(candidate.id)) || 0) > 0);
+            let pieStartForVisibleCandidates = 0;
+            const visiblePieStops = pieCandidates.map((candidate) => {
+              const index = candidateDefinitions.indexOf(candidate);
+              const votes = Number(candidateTotals.get(String(candidate.id)) || 0);
+              const pct = totalCandidateVotes > 0 ? (votes / totalCandidateVotes) * 100 : 0;
+              const pieEnd = pieStartForVisibleCandidates + pct;
+              const stop = `${candidateColors[index % candidateColors.length]} ${pieStartForVisibleCandidates}% ${pieEnd}%`;
+              pieStartForVisibleCandidates = pieEnd;
+              return stop;
             });
+            const pieHasVotes = pieCandidates.length > 0;
+            let pieLabelStart = 0;
+            const pieLabels = pieCandidates.map((candidate) => {
+              const votes = Number(candidateTotals.get(String(candidate.id)) || 0);
+              const pct = totalCandidateVotes > 0 ? (votes / totalCandidateVotes) * 100 : 0;
+              const midpoint = pieLabelStart + (pct / 2);
+              const angle = (midpoint / 100) * Math.PI * 2 - (Math.PI / 2);
+              const radius = 36;
+              const x = 50 + Math.cos(angle) * radius;
+              const y = 50 + Math.sin(angle) * radius;
+              pieLabelStart += pct;
+              return `<span class="candidate-results-pie-label" style="left:${x.toFixed(2)}%;top:${y.toFixed(2)}%">${escapeHtml(candidate.alias)}<small>${pct.toFixed(2)}%</small></span>`;
+            }).join('');
+            resultsRows.innerHTML = `
+              <div class="candidate-results-layout">
+                <div class="candidate-results-bars">${candidateRows}</div>
+                <div class="candidate-results-splitter" role="separator" aria-label="Resize chart columns" tabindex="0"></div>
+                <div class="candidate-results-pie-panel">
+                  <div class="candidate-results-pie${pieHasVotes ? '' : ' empty'}"${pieHasVotes ? ` style="background: conic-gradient(${visiblePieStops.join(', ')})"` : ''} aria-label="Candidate results by percentage">${pieHasVotes ? pieLabels : '<span>0.00%</span>'}</div>
+                </div>
+              </div>`;
+            const chartLayout = resultsRows.querySelector('.candidate-results-layout');
+            const splitter = resultsRows.querySelector('.candidate-results-splitter');
+            const applyChartSplit = () => {
+              if (chartLayout) chartLayout.style.gridTemplateColumns = `${resultsChartSplitRatio}fr 8px ${1 - resultsChartSplitRatio}fr`;
+            };
+            applyChartSplit();
+            if (chartLayout && splitter) {
+              splitter.addEventListener('pointerdown', (event) => {
+                event.preventDefault();
+                splitter.setPointerCapture(event.pointerId);
+                const updateSplit = (moveEvent) => {
+                  const bounds = chartLayout.getBoundingClientRect();
+                  const ratio = (moveEvent.clientX - bounds.left) / bounds.width;
+                  resultsChartSplitRatio = Math.max(0.2, Math.min(0.8, ratio));
+                  applyChartSplit();
+                };
+                const stopSplit = () => {
+                  splitter.removeEventListener('pointermove', updateSplit);
+                  splitter.removeEventListener('pointerup', stopSplit);
+                  splitter.removeEventListener('pointercancel', stopSplit);
+                };
+                splitter.addEventListener('pointermove', updateSplit);
+                splitter.addEventListener('pointerup', stopSplit);
+                splitter.addEventListener('pointercancel', stopSplit);
+              });
+            }
             resultsChart.style.display = '';
           }
 
@@ -2439,7 +2570,7 @@
                 const munRegEl = document.getElementById(`results-registered-mun-${region.id}-${mun.id}`);
                 const munInPlaceEl = document.getElementById(`results-voted-in-place-mun-${region.id}-${mun.id}`);
                 const munFromHomeEl = document.getElementById(`results-voted-from-home-mun-${region.id}-${mun.id}`);
-                if (munRegEl) munRegEl.textContent = formatNumber(munReg);
+                if (munRegEl) munRegEl.innerHTML = formatRegisteredWithRik(munReg, mun.RIK_totalMunicipalityRegisteredVoters);
                 if (munInPlaceEl) munInPlaceEl.textContent = formatNumber(munCollectedInPlace);
                 if (munFromHomeEl) munFromHomeEl.textContent = formatNumber(munCollectedFromHome);
                 updateCandidateCells(`mun-${region.id}-${mun.id}`, 'results', munCandidateTotals, munResultSum);
@@ -2498,7 +2629,7 @@
             const regionRegEl = document.getElementById(`results-registered-region-${region.id}`);
             const regionInPlaceEl = document.getElementById(`results-voted-in-place-region-${region.id}`);
             const regionFromHomeEl = document.getElementById(`results-voted-from-home-region-${region.id}`);
-            if (regionRegEl) regionRegEl.textContent = formatNumber(regionRegisteredSum);
+            if (regionRegEl) regionRegEl.innerHTML = formatRegisteredWithRik(regionRegisteredSum, region.RIK_totalRegionRegisteredVoters);
             if (regionInPlaceEl) regionInPlaceEl.textContent = formatNumber(regionCollectedInPlaceSum);
             if (regionFromHomeEl) regionFromHomeEl.textContent = formatNumber(regionCollectedFromHomeSum);
             updateCandidateCells(`region-${region.id}`, 'results', regionCandidateTotals, regionResultSum);
@@ -2667,9 +2798,9 @@
                   const regCount = Number(place.registeredVoters || 0);
                   munReg += regCount;
                   regionRegisteredSum += regCount;
-                  const collectedInPlace = getCollectedInPlace(region.name, place.name);
-                  const collectedFromHome = getCollectedFromHome(region.name, place.name);
-                  const collected = getCollected(region.name, place.name);
+                  const collectedInPlace = Number(place.totalVoted || place.voted || 0);
+                  const collectedFromHome = Number(place.totalVotedFromHome || place.votedFromHome || 0);
+                  const collected = collectedInPlace + collectedFromHome;
                   munCollectedInPlace += collectedInPlace;
                   munCollectedFromHome += collectedFromHome;
                   munCollected += collected;
@@ -2696,7 +2827,7 @@
                 const munFromHomeEl = document.getElementById(`mun-from-home-${region.id}-${mun.id}`);
                 const munColEl = document.getElementById(`mun-total-${region.id}-${mun.id}`);
                 const munPctEl = document.getElementById(`mun-percent-${region.id}-${mun.id}`);
-                if (munRegEl) munRegEl.textContent = formatNumber(munReg);
+                if (munRegEl) munRegEl.innerHTML = formatRegisteredWithRik(munReg, mun.RIK_totalMunicipalityRegisteredVoters);
                 if (munInPlaceEl) munInPlaceEl.textContent = formatNumber(munCollectedInPlace);
                 if (munFromHomeEl) munFromHomeEl.textContent = formatNumber(munCollectedFromHome);
                 if (munColEl) munColEl.textContent = formatNumber(munCollected);
@@ -2715,9 +2846,9 @@
                   place.subPlaces.forEach(sub => {
                     const regCount = Number(sub.registeredVoters || 0);
                     regionRegisteredSum += regCount;
-                    const collectedInPlace = getCollectedInPlace(region.name, sub.name);
-                    const collectedFromHome = getCollectedFromHome(region.name, sub.name);
-                    const collected = getCollected(region.name, sub.name);
+                    const collectedInPlace = Number(sub.totalVoted || sub.voted || 0);
+                    const collectedFromHome = Number(sub.totalVotedFromHome || sub.votedFromHome || 0);
+                    const collected = collectedInPlace + collectedFromHome;
                     regionCollectedInPlaceSum += collectedInPlace;
                     regionCollectedFromHomeSum += collectedFromHome;
                     regionCollectedSum += collected;
@@ -2738,9 +2869,9 @@
                 } else {
                   const regCount = Number(place.registeredVoters || 0);
                   regionRegisteredSum += regCount;
-                  const collectedInPlace = getCollectedInPlace(region.name, place.name);
-                  const collectedFromHome = getCollectedFromHome(region.name, place.name);
-                  const collected = getCollected(region.name, place.name);
+                  const collectedInPlace = Number(place.totalVoted || place.voted || 0);
+                  const collectedFromHome = Number(place.totalVotedFromHome || place.votedFromHome || 0);
+                  const collected = collectedInPlace + collectedFromHome;
                   regionCollectedInPlaceSum += collectedInPlace;
                   regionCollectedFromHomeSum += collectedFromHome;
                   regionCollectedSum += collected;
@@ -2767,7 +2898,7 @@
             const regionFromHomeEl = document.getElementById(`region-from-home-${region.id}`);
             const regionColEl = document.getElementById(`region-total-${region.id}`);
             const regionPctEl = document.getElementById(`region-percent-${region.id}`);
-            if (regionRegEl) regionRegEl.textContent = formatNumber(regionRegisteredSum);
+            if (regionRegEl) regionRegEl.innerHTML = formatRegisteredWithRik(regionRegisteredSum, region.RIK_totalRegionRegisteredVoters);
             if (regionInPlaceEl) regionInPlaceEl.textContent = formatNumber(regionCollectedInPlaceSum);
             if (regionFromHomeEl) regionFromHomeEl.textContent = formatNumber(regionCollectedFromHomeSum);
             if (regionColEl) regionColEl.textContent = formatNumber(regionCollectedSum);
@@ -2891,6 +3022,7 @@
         btn.addEventListener('click', async () => {
           const locale = getLocaleDictionary();
           const operations = [];
+          const clearRawMessages = Boolean(document.getElementById('dbClearRawMessages')?.checked);
           if (document.getElementById('dbClearSender')?.checked) operations.push('sender');
           if (document.getElementById('dbClearStatus')?.checked) operations.push('status');
           if (document.getElementById('dbClearTurnout')?.checked) operations.push('turnout');
@@ -2898,25 +3030,40 @@
           if (document.getElementById('dbClearCorrection')?.checked) operations.push('correction');
 
           const resultEl = document.getElementById('dbClearDataResult');
-          if (!operations.length) {
+          if (!operations.length && !clearRawMessages) {
             if (resultEl) resultEl.textContent = locale.dbClearNoneSelected || 'Select at least one option.';
             return;
           }
 
+          if (clearRawMessages && !window.confirm(locale.dbClearRawMessagesConfirm || 'Delete all raw messages? This cannot be undone.')) return;
+
           try {
-            const response = await fetch('/api/config/clear-data', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ operations })
-            });
-            const data = await response.json();
-            if (response.ok) {
-              if (resultEl) resultEl.textContent = locale.dbClearSuccess || 'Data cleared successfully.';
-            } else {
-              if (resultEl) resultEl.textContent = (locale.dbClearFailed || 'Failed: ') + (data.error || '');
+            if (operations.length) {
+              const response = await fetch('/api/config/clear-data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ operations })
+              });
+              const data = await response.json();
+              if (!response.ok) throw new Error(data.error || 'Data clear failed');
+            }
+
+            if (clearRawMessages) {
+              const response = await fetch('/api/signal/raw-messages', { method: 'DELETE' });
+              const data = await response.json();
+              if (!response.ok) throw new Error(data.error || 'Raw message delete failed');
+              if (resultEl) resultEl.textContent = (locale.dbClearRawMessagesSuccess || 'Raw messages deleted: {count}.').replace('{count}', formatNumber(data.removed || 0));
+              await refreshDebugRawMessagesTable();
+            } else if (resultEl) {
+              resultEl.textContent = locale.dbClearSuccess || 'Data cleared successfully.';
+            }
+            document.querySelectorAll('.db-clear-item').forEach((checkbox) => { checkbox.checked = false; });
+            if (allCb) {
+              allCb.checked = false;
+              allCb.indeterminate = false;
             }
           } catch (err) {
-            if (resultEl) resultEl.textContent = locale.dbClearFailed || 'Failed to clear data.';
+            if (resultEl) resultEl.textContent = err.message || locale.dbClearFailed || 'Failed to clear data.';
           }
         });
       }
@@ -3726,9 +3873,9 @@
         syncStopwatchDisplay();
         await refreshSignalMessageTables();
         await loadSummary();
-        await loadResultsSummary();
+        await globalThis.loadResultsSummary();
         setInterval(loadSummary, 5000);
-        setInterval(loadResultsSummary, 5000);
+        setInterval(() => globalThis.loadResultsSummary(), 5000);
         setInterval(refreshDebugValidMessageTables, 5000);
         setInterval(refreshDebugRawMessagesTable, 5000);
         setInterval(refreshSignalPanel, 8000);
