@@ -975,6 +975,19 @@
         height: 1px;
         background: #dbe3ee;
       }
+      .regions-table thead tr:first-child #resultsHeaderBallots {
+        position: relative;
+        border-bottom-color: transparent;
+      }
+      .regions-table thead tr:first-child #resultsHeaderBallots::after {
+        content: "";
+        position: absolute;
+        left: 2.5%;
+        right: 2.5%;
+        bottom: 0;
+        height: 1px;
+        background: #dbe3ee;
+      }
       .regions-table thead tr:first-child th.candidate-group-header {
         position: relative;
       }
@@ -1024,6 +1037,7 @@
       .region-row td { background: #fff; font-weight: 700; }
       .mun-row td { background: #fbfdff; }
       .place-row td { background: transparent; }
+      .regions-table tr.ballot-validation-error td:first-child { color: #dc2626; }
       .regions-table tr:hover td { background: #fbfbfd; }
       .region-node { margin-bottom: 12px; border-bottom: 1px solid #eef2f7; padding-bottom: 10px; }
       .node-header { font-weight: 700; margin-bottom: 8px; }

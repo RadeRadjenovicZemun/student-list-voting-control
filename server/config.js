@@ -16,8 +16,7 @@ function walkPlaceVote(place) {
   if (Array.isArray(place.subPlaces)) {
     const subtotal = place.subPlaces.reduce((sum, sub) => sum + walkPlaceVote(sub), 0);
     place.totalVoted = subtotal;
-    const homeSubtotal = place.subPlaces.reduce((sum, sub) => sum + walkPlaceVoteFromHome(sub), 0);
-    place.totalVotedFromHome = homeSubtotal + toNumber(place.votedFromHome, 0);
+    place.votedFromHome = place.subPlaces.reduce((sum, sub) => sum + walkPlaceVoteFromHome(sub), 0);
     return subtotal;
   }
   const value = toNumber(place.voted, 0);
@@ -25,7 +24,6 @@ function walkPlaceVote(place) {
   place.voted = value;
   place.totalVoted = value;
   place.votedFromHome = homeValue;
-  place.totalVotedFromHome = homeValue;
   return value;
 }
 
@@ -33,12 +31,11 @@ function walkPlaceVoteFromHome(place) {
   if (!place || typeof place !== 'object') return 0;
   if (Array.isArray(place.subPlaces)) {
     const subtotal = place.subPlaces.reduce((sum, sub) => sum + walkPlaceVoteFromHome(sub), 0);
-    place.totalVotedFromHome = subtotal + toNumber(place.votedFromHome, 0);
-    return place.totalVotedFromHome;
+    place.votedFromHome = subtotal + toNumber(place.votedFromHome, 0);
+    return place.votedFromHome;
   }
   const value = toNumber(place.votedFromHome, 0);
   place.votedFromHome = value;
-  place.totalVotedFromHome = value;
   return value;
 }
 
@@ -56,7 +53,7 @@ function syncConfigVoteTotals(node) {
         munTotal += walkPlaceVote(place);
       });
       mun.totalVoted = munTotal;
-      mun.totalVotedFromHome = (mun.places || []).reduce((sum, place) => sum + toNumber(place.totalVotedFromHome, 0), 0) + toNumber(mun.votedFromHome, 0);
+      mun.votedFromHome = (mun.places || []).reduce((sum, place) => sum + toNumber(place.votedFromHome, 0), 0);
       total += munTotal;
     });
   }
@@ -67,7 +64,7 @@ function syncConfigVoteTotals(node) {
       if (Array.isArray(place.subPlaces)) {
         const subTotal = place.subPlaces.reduce((sum, sub) => sum + walkPlaceVote(sub), 0);
         place.totalVoted = subTotal;
-        place.totalVotedFromHome = place.subPlaces.reduce((sum, sub) => sum + toNumber(sub.totalVotedFromHome, 0), 0) + toNumber(place.votedFromHome, 0);
+        place.votedFromHome = place.subPlaces.reduce((sum, sub) => sum + toNumber(sub.votedFromHome, 0), 0);
         total += subTotal;
       } else {
         total += walkPlaceVote(place);
@@ -94,11 +91,11 @@ function syncConfigVoteTotals(node) {
   }
 
   node.totalVoted = total;
-  node.totalVotedFromHome = toNumber(node.votedFromHome, 0) + (Array.isArray(node.places) ? node.places.reduce((sum, place) => sum + toNumber(place.totalVotedFromHome, 0), 0) : 0)
-    + (Array.isArray(node.municipalities) ? node.municipalities.reduce((sum, mun) => sum + toNumber(mun.totalVotedFromHome, 0), 0) : 0)
-    + (Array.isArray(node.regions) ? node.regions.reduce((sum, region) => sum + toNumber(region.totalVotedFromHome, 0), 0) : 0)
-    + (Array.isArray(node.votingUnits) ? node.votingUnits.reduce((sum, unit) => sum + toNumber(unit.totalVotedFromHome, 0), 0) : 0)
-    + (Array.isArray(node.subPlaces) ? node.subPlaces.reduce((sum, sub) => sum + toNumber(sub.totalVotedFromHome, 0), 0) : 0);
+  node.votedFromHome = (Array.isArray(node.places) ? node.places.reduce((sum, place) => sum + toNumber(place.votedFromHome, 0), 0) : 0)
+    + (Array.isArray(node.municipalities) ? node.municipalities.reduce((sum, mun) => sum + toNumber(mun.votedFromHome, 0), 0) : 0)
+    + (Array.isArray(node.regions) ? node.regions.reduce((sum, region) => sum + toNumber(region.votedFromHome, 0), 0) : 0)
+    + (Array.isArray(node.votingUnits) ? node.votingUnits.reduce((sum, unit) => sum + toNumber(unit.votedFromHome, 0), 0) : 0)
+    + (Array.isArray(node.subPlaces) ? node.subPlaces.reduce((sum, sub) => sum + toNumber(sub.votedFromHome, 0), 0) : 0);
   return total;
 }
 

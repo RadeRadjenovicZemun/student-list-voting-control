@@ -1857,11 +1857,12 @@
         table.appendChild(thead);
         const tbody = el('tbody');
 
-        function activityCell(senderStatus) {
+        function activityCell(senderStatus, rowKey = '') {
           const s = String(senderStatus ?? '0');
           const key = `controllerStatus${s}`;
           const label = locale[key] || locale.controllerStatus0 || 'Not Covered';
-          return `<td><span class="ctrl-status ctrl-status-${s}">${label}</span></td>`;
+          const id = rowKey ? ` id="results-activity-${rowKey}"` : '';
+          return `<td><span${id} class="ctrl-status ctrl-status-${s}">${label}</span></td>`;
         }
 
         function formatRegisteredWithRik(count, rikCount) {
@@ -2071,17 +2072,22 @@
         const candidateSubHeaders = candidates.map((candidate) => (
           `<th id="resultsHeaderCandidateNumber-${escapeHtml(candidate.id)}">${locale.tableTurnoutNumber || 'Number'}</th><th id="resultsHeaderCandidatePercent-${escapeHtml(candidate.id)}">${locale.tableTurnoutPercent || 'Percentage'}</th>`
         )).join('');
+        const ballotGroupHeader = `<th id="resultsHeaderBallots" colspan="3" class="group-header">${locale.tableBallots || 'Ballots'}</th>`;
+        const ballotSubHeaders = `<th id="resultsHeaderValid">${locale.tableBallotsValid || 'Valid'}</th><th id="resultsHeaderNonValid">${locale.tableBallotsNonValid || 'Non valid'}</th><th id="resultsHeaderRemaining">${locale.tableBallotsRemaining || 'Remaining'}</th>`;
         thead.innerHTML = `
           <tr>
             <th id="resultsHeaderName" rowspan="2" style="width:30%">${locale.tableName || 'Name'}</th>
             <th id="resultsHeaderRegistered" rowspan="2" style="width:10%">${locale.tableRegistered || 'Registered'}</th>
-            <th id="resultsHeaderVoted" colspan="2" class="group-header" style="width:22%">${locale.tableVoted || 'Voted'}</th>
+            <th id="resultsHeaderVoted" colspan="3" class="group-header" style="width:22%">${locale.tableVoted || 'Voted'}</th>
+            ${ballotGroupHeader}
             ${candidateHeaderCells}
             <th id="resultsHeaderControllerActivity" rowspan="2" style="width:10%">${locale.tableControllerActivity || 'Controller Activity'}</th>
           </tr>
           <tr>
             <th id="resultsHeaderVotedInPlace">${locale.tableVotedInPlace || 'Voted in Place'}</th>
             <th id="resultsHeaderVotedFromHome">${locale.tableVotedFromHome || 'Voted from Home'}</th>
+            <th id="resultsHeaderVotedTotal">${locale.tableVotedTotal || 'Total'}</th>
+            ${ballotSubHeaders}
             ${candidateSubHeaders}
           </tr>`;
         table.appendChild(thead);
@@ -2095,11 +2101,55 @@
           return `<td><span class="ctrl-status ctrl-status-${s}">${label}</span></td>`;
         }
 
-        function candidateCells(rowKey) {
+        function getBallotTotalsForResult(result, votedTotal = 0) {
+          const nonValidValues = Array.isArray(result && result.nonValidVotes) ? result.nonValidVotes : [];
+          const inferredNonValid = nonValidValues.reduce((sum, item) => sum + Number(item && item.votes || 0), 0);
+          const nonValid = Number((result && result.nonRegularBallots) != null ? result.nonRegularBallots : inferredNonValid);
+          const remaining = Number(result && result.remainingBallots || 0);
+          const totalVoted = Number(votedTotal || 0);
+          const valid = Math.max(totalVoted - nonValid, 0);
+          return { valid, nonValid, remaining };
+        }
+
+        function ballotCells(rowKey, result, votedTotal = 0) {
+          const totals = getBallotTotalsForResult(result, votedTotal);
+          return `${numericCell(`<span id="results-ballot-valid-${rowKey}">${formatNumber(totals.valid)}</span>`)}${numericCell(`<span id="results-ballot-non-valid-${rowKey}">${formatNumber(totals.nonValid)}</span>`)}${numericCell(`<span id="results-ballot-remaining-${rowKey}">${formatNumber(totals.remaining)}</span>`)}`;
+        }
+
+        function hasBallotValidationMismatch(place) {
+          if (getPlaceSenderStatusId(place) !== '6') return false;
+          const votedInPlace = Number(place && (place.totalVoted || place.voted) || 0);
+          const votedFromHome = Number(place && place.votedFromHome || 0);
+          const totals = getBallotTotalsForResult(place && place.result, votedInPlace + votedFromHome);
+          const registeredVoters = Number(place && place.registeredVoters || 0);
+          return registeredVoters - (totals.valid + totals.nonValid + totals.remaining) !== 0;
+        }
+
+        function hasInvalidDescendant(node) {
+          if (!node) return false;
+          if (Array.isArray(node.places) && node.places.some((place) => hasBallotValidationMismatch(place) || hasInvalidDescendant(place))) return true;
+          if (Array.isArray(node.subPlaces) && node.subPlaces.some((place) => hasBallotValidationMismatch(place) || hasInvalidDescendant(place))) return true;
+          if (Array.isArray(node.municipalities) && node.municipalities.some(hasInvalidDescendant)) return true;
+          return false;
+        }
+
+        function candidateCells(rowKey, candidateMap = new Map(), rowTotal = 0) {
           return candidates.map((candidate) => {
             const candidateId = String(candidate.id);
-            return `${numericCell(`<span id="results-candidate-number-${candidateId}-${rowKey}">0</span>`)}${numericCell(`<span id="results-candidate-percent-${candidateId}-${rowKey}">0%</span>`)}`
+            const voteCount = Number(candidateMap.get(candidateId) || 0);
+            const votePct = rowTotal > 0 ? (voteCount / rowTotal) * 100 : 0;
+            return `${numericCell(`<span id="results-candidate-number-${candidateId}-${rowKey}">${formatNumber(voteCount)}</span>`)}${numericCell(`<span id="results-candidate-percent-${candidateId}-${rowKey}">${votePct.toFixed(2)}%</span>`)}`;
           }).join('');
+        }
+
+        function updateBallotCells(rowKey, result, votedTotal = 0) {
+          const totals = getBallotTotalsForResult(result, votedTotal);
+          const validEl = document.getElementById(`results-ballot-valid-${rowKey}`);
+          const nonValidEl = document.getElementById(`results-ballot-non-valid-${rowKey}`);
+          const remainingEl = document.getElementById(`results-ballot-remaining-${rowKey}`);
+          if (validEl) validEl.textContent = formatNumber(totals.valid);
+          if (nonValidEl) nonValidEl.textContent = formatNumber(totals.nonValid);
+          if (remainingEl) remainingEl.textContent = formatNumber(totals.remaining);
         }
 
         function formatRegisteredWithRik(count, rikCount) {
@@ -2119,10 +2169,14 @@
         // instead of building the full 8000+ row tree up front.
         function createPlaceRow(place, parentId) {
           const placeRow = el('tr');
-          placeRow.className = 'place-row hidden-row';
+          placeRow.className = `place-row hidden-row${hasBallotValidationMismatch(place) ? ' ballot-validation-error' : ''}`;
           placeRow.dataset.parent = parentId;
           placeRow.dataset.id = `results-place-${place.id}`;
-          placeRow.innerHTML = `<td>${place.name}</td><td><span id="results-registered-place-${place.id}">${place.registeredVoters || 0}</span></td><td><span id="results-voted-in-place-place-${place.id}">0</span></td><td><span id="results-voted-from-home-place-${place.id}">0</span></td>${candidateCells(`place-${place.id}`)}${activityCell(place.senderStatus)}`;
+          const votedInPlace = Number(place.totalVoted || place.voted || 0);
+          const votedFromHome = Number(place.votedFromHome || 0);
+          const votedTotal = votedInPlace + votedFromHome;
+          const stats = getResultStats(place, candidateIds);
+          placeRow.innerHTML = `<td>${place.name}</td><td class="numeric-cell"><span id="results-registered-place-${place.id}">${place.registeredVoters || 0}</span></td><td class="numeric-cell"><span id="results-voted-in-place-place-${place.id}">${formatNumber(votedInPlace)}</span></td><td class="numeric-cell"><span id="results-voted-from-home-place-${place.id}">${formatNumber(votedFromHome)}</span></td><td class="numeric-cell"><span id="results-voted-total-place-${place.id}">${formatNumber(votedTotal)}</span></td>${ballotCells(`place-${place.id}`, place.result, votedTotal)}${candidateCells(`place-${place.id}`, stats.votes, stats.total)}${activityCell(getPlaceSenderStatusId(place), `place-${place.id}`)}`;
           return placeRow;
         }
 
@@ -2146,10 +2200,14 @@
         function createMunRow(region, mun) {
           const munId = `results-mun-${region.id}-${mun.id}`;
           const munRow = el('tr');
-          munRow.className = 'mun-row hidden-row';
+          munRow.className = `mun-row hidden-row${hasInvalidDescendant(mun) ? ' ballot-validation-error' : ''}`;
           munRow.dataset.parent = `results-region-${region.id}`;
           munRow.dataset.id = munId;
-          munRow.innerHTML = `<td><button class="collapse-btn" data-target="${munId}">▶</button> ${mun.name}</td><td id="results-registered-mun-${region.id}-${mun.id}">${formatRegisteredWithRik(mun.totalMunicipalityRegisteredVoters, mun.RIK_totalMunicipalityRegisteredVoters)}</td><td><span id="results-voted-in-place-mun-${region.id}-${mun.id}">0</span></td><td><span id="results-voted-from-home-mun-${region.id}-${mun.id}">0</span></td>${candidateCells(`mun-${region.id}-${mun.id}`)}<td></td>`;
+          const votedInPlace = Number(mun.totalVoted || mun.voted || 0);
+          const votedFromHome = Number(mun.votedFromHome || 0);
+          const votedTotal = votedInPlace + votedFromHome;
+          const stats = getResultStats(mun, candidateIds);
+          munRow.innerHTML = `<td><button class="collapse-btn" data-target="${munId}">▶</button> ${mun.name}</td><td class="numeric-cell" id="results-registered-mun-${region.id}-${mun.id}">${formatRegisteredWithRik(mun.totalMunicipalityRegisteredVoters, mun.RIK_totalMunicipalityRegisteredVoters)}</td><td class="numeric-cell"><span id="results-voted-in-place-mun-${region.id}-${mun.id}">${formatNumber(votedInPlace)}</span></td><td class="numeric-cell"><span id="results-voted-from-home-mun-${region.id}-${mun.id}">${formatNumber(votedFromHome)}</span></td><td class="numeric-cell"><span id="results-voted-total-mun-${region.id}-${mun.id}">${formatNumber(votedTotal)}</span></td>${ballotCells(`mun-${region.id}-${mun.id}`, mun.result, votedTotal)}${candidateCells(`mun-${region.id}-${mun.id}`, stats.votes, stats.total)}<td></td>`;
           attachLazyToggle(munRow, () => (mun.places || []).map((place) => createPlaceRow(place, munId)));
           return munRow;
         }
@@ -2157,10 +2215,10 @@
         function createPlaceGroupRow(region, place) {
           const groupId = `results-mun-${region.id}-${place.id}`;
           const parentRow = el('tr');
-          parentRow.className = 'mun-row hidden-row';
+          parentRow.className = `mun-row hidden-row${hasInvalidDescendant(place) ? ' ballot-validation-error' : ''}`;
           parentRow.dataset.parent = `results-region-${region.id}`;
           parentRow.dataset.id = groupId;
-          parentRow.innerHTML = `<td><button class="collapse-btn" data-target="${groupId}">▶</button> ${place.name}</td>${emptyCells(4 + (candidates.length * 2))}`;
+          parentRow.innerHTML = `<td><button class="collapse-btn" data-target="${groupId}">▶</button> ${place.name}</td>${emptyCells(5 + 3 + (candidates.length * 2))}`;
           attachLazyToggle(parentRow, () => (place.subPlaces || []).map((sub) => createPlaceRow(sub, groupId)));
           return parentRow;
         }
@@ -2168,9 +2226,13 @@
         function createRegionRow(region) {
           const regionId = `results-region-${region.id}`;
           const regionRow = el('tr');
-          regionRow.className = 'region-row';
+          regionRow.className = `region-row${hasInvalidDescendant(region) ? ' ballot-validation-error' : ''}`;
           regionRow.dataset.id = regionId;
-          regionRow.innerHTML = `<td><button class="collapse-btn" data-target="${regionId}">▶</button> <strong>${region.name}</strong></td><td id="results-registered-region-${region.id}">${formatRegisteredWithRik(region.totalRegionRegisteredVoters, region.RIK_totalRegionRegisteredVoters)}</td><td><span id="results-voted-in-place-region-${region.id}">0</span></td><td><span id="results-voted-from-home-region-${region.id}">0</span></td>${candidateCells(`region-${region.id}`)}<td></td>`;
+          const votedInPlace = Number(region.totalVoted || region.voted || 0);
+          const votedFromHome = Number(region.votedFromHome || 0);
+          const votedTotal = votedInPlace + votedFromHome;
+          const stats = getResultStats(region, candidateIds);
+          regionRow.innerHTML = `<td><button class="collapse-btn" data-target="${regionId}">▶</button> <strong>${region.name}</strong></td><td class="numeric-cell" id="results-registered-region-${region.id}">${formatRegisteredWithRik(region.totalRegionRegisteredVoters, region.RIK_totalRegionRegisteredVoters)}</td><td class="numeric-cell"><span id="results-voted-in-place-region-${region.id}">${formatNumber(votedInPlace)}</span></td><td class="numeric-cell"><span id="results-voted-from-home-region-${region.id}">${formatNumber(votedFromHome)}</span></td><td class="numeric-cell"><span id="results-voted-total-region-${region.id}">${formatNumber(votedTotal)}</span></td>${ballotCells(`region-${region.id}`, region.result, votedTotal)}${candidateCells(`region-${region.id}`, stats.votes, stats.total)}<td></td>`;
           attachLazyToggle(regionRow, () => {
             const rows = [];
             if (Array.isArray(region.municipalities) && region.municipalities.length) {
@@ -2233,6 +2295,30 @@
             }
           });
         }
+
+        globalThis.refreshResultsBallotValidation = () => {
+          const findRow = (rowId) => Array.from(container.querySelectorAll('tr')).find((row) => row.dataset.id === rowId);
+          const setRowState = (rowId, invalid) => {
+            const row = findRow(rowId);
+            if (row) row.classList.toggle('ballot-validation-error', invalid);
+          };
+          regions.forEach((region) => {
+            setRowState(`results-region-${region.id}`, hasInvalidDescendant(region));
+            (region.municipalities || []).forEach((mun) => {
+              setRowState(`results-mun-${region.id}-${mun.id}`, hasInvalidDescendant(mun));
+            });
+            (region.places || []).forEach((place) => {
+              const rowId = `results-mun-${region.id}-${place.id}`;
+              setRowState(rowId, hasInvalidDescendant(place) || hasBallotValidationMismatch(place));
+              (place.subPlaces || []).forEach((sub) => {
+                setRowState(`results-place-${sub.id}`, hasBallotValidationMismatch(sub));
+              });
+              if (!Array.isArray(place.subPlaces) || place.subPlaces.length === 0) {
+                setRowState(`results-place-${place.id}`, hasBallotValidationMismatch(place));
+              }
+            });
+          });
+        };
       }
 
       async function loadResultsSummary() {
@@ -2275,7 +2361,7 @@
             region.municipalities.forEach(mun => {
               (mun.places || []).forEach(place => {
                 const valueInPlace = Number(place.totalVoted || place.voted || 0);
-                const valueFromHome = Number(place.totalVotedFromHome || place.votedFromHome || 0);
+                const valueFromHome = Number(place.votedFromHome || 0);
                 const valueTotal = valueInPlace + valueFromHome;
                 totals.placeTotals[`${region.name} / ${place.name}`] = valueTotal;
                 totals.placeTotalsInPlace[`${region.name} / ${place.name}`] = valueInPlace;
@@ -2292,7 +2378,7 @@
               if (Array.isArray(place.subPlaces)) {
                 place.subPlaces.forEach(sub => {
                   const valueInPlace = Number(sub.totalVoted || sub.voted || 0);
-                  const valueFromHome = Number(sub.totalVotedFromHome || sub.votedFromHome || 0);
+                  const valueFromHome = Number(sub.votedFromHome || 0);
                   const valueTotal = valueInPlace + valueFromHome;
                   totals.placeTotals[`${region.name} / ${sub.name}`] = valueTotal;
                   totals.placeTotalsInPlace[`${region.name} / ${sub.name}`] = valueInPlace;
@@ -2303,7 +2389,7 @@
                 });
               } else {
                 const valueInPlace = Number(place.totalVoted || place.voted || 0);
-                const valueFromHome = Number(place.totalVotedFromHome || place.votedFromHome || 0);
+                const valueFromHome = Number(place.votedFromHome || 0);
                 const valueTotal = valueInPlace + valueFromHome;
                 totals.placeTotals[`${region.name} / ${place.name}`] = valueTotal;
                 totals.placeTotalsInPlace[`${region.name} / ${place.name}`] = valueInPlace;
@@ -2608,6 +2694,25 @@
             });
           }
 
+          function updateActivityCell(rowKey, place) {
+            const statusId = getPlaceSenderStatusId(place);
+            const statusEl = document.getElementById(`results-activity-${rowKey}`);
+            if (!statusEl) return;
+            const statusLabel = locale[`controllerStatus${statusId}`] || locale.controllerStatus0 || 'Not Covered';
+            statusEl.className = `ctrl-status ctrl-status-${statusId}`;
+            statusEl.textContent = statusLabel;
+          }
+
+          function updateRowBallotCells(rowKey, result, votedTotal = 0) {
+            const totals = getBallotTotalsForResult(result, votedTotal);
+            const validEl = document.getElementById(`results-ballot-valid-${rowKey}`);
+            const nonValidEl = document.getElementById(`results-ballot-non-valid-${rowKey}`);
+            const remainingEl = document.getElementById(`results-ballot-remaining-${rowKey}`);
+            if (validEl) validEl.textContent = formatNumber(totals.valid);
+            if (nonValidEl) nonValidEl.textContent = formatNumber(totals.nonValid);
+            if (remainingEl) remainingEl.textContent = formatNumber(totals.remaining);
+          }
+
           regions.forEach((region) => {
             let regionRegisteredSum = 0;
             let regionCollectedInPlaceSum = 0;
@@ -2628,7 +2733,7 @@
                   munReg += regCount;
                   regionRegisteredSum += regCount;
                   const collectedInPlace = Number(place.totalVoted || place.voted || 0);
-                  const collectedFromHome = Number(place.totalVotedFromHome || place.votedFromHome || 0);
+                  const collectedFromHome = Number(place.votedFromHome || 0);
                   munCollectedInPlace += collectedInPlace;
                   munCollectedFromHome += collectedFromHome;
                   regionCollectedInPlaceSum += collectedInPlace;
@@ -2643,18 +2748,25 @@
                   const regEl = document.getElementById(`results-registered-place-${place.id}`);
                   const colInPlaceEl = document.getElementById(`results-voted-in-place-place-${place.id}`);
                   const colFromHomeEl = document.getElementById(`results-voted-from-home-place-${place.id}`);
+                  const colTotalEl = document.getElementById(`results-voted-total-place-${place.id}`);
                   if (regEl) regEl.textContent = formatNumber(regCount);
                   if (colInPlaceEl) colInPlaceEl.textContent = formatNumber(collectedInPlace);
                   if (colFromHomeEl) colFromHomeEl.textContent = formatNumber(collectedFromHome);
+                  if (colTotalEl) colTotalEl.textContent = formatNumber(collectedInPlace + collectedFromHome);
+                  updateRowBallotCells(`place-${place.id}`, place.result, collectedInPlace + collectedFromHome);
                   updateCandidateCells(`place-${place.id}`, 'results', stats.votes, stats.total);
+                  updateActivityCell(`place-${place.id}`, place);
                 });
 
                 const munRegEl = document.getElementById(`results-registered-mun-${region.id}-${mun.id}`);
                 const munInPlaceEl = document.getElementById(`results-voted-in-place-mun-${region.id}-${mun.id}`);
                 const munFromHomeEl = document.getElementById(`results-voted-from-home-mun-${region.id}-${mun.id}`);
+                const munTotalEl = document.getElementById(`results-voted-total-mun-${region.id}-${mun.id}`);
                 if (munRegEl) munRegEl.innerHTML = formatRegisteredWithRik(munReg, mun.RIK_totalMunicipalityRegisteredVoters);
                 if (munInPlaceEl) munInPlaceEl.textContent = formatNumber(munCollectedInPlace);
                 if (munFromHomeEl) munFromHomeEl.textContent = formatNumber(munCollectedFromHome);
+                if (munTotalEl) munTotalEl.textContent = formatNumber(munCollectedInPlace + munCollectedFromHome);
+                updateRowBallotCells(`mun-${region.id}-${mun.id}`, mun.result, munCollectedInPlace + munCollectedFromHome);
                 updateCandidateCells(`mun-${region.id}-${mun.id}`, 'results', munCandidateTotals, munResultSum);
               });
             }
@@ -2668,7 +2780,7 @@
                     const regCount = Number(sub.registeredVoters || 0);
                     regionRegisteredSum += regCount;
                     const collectedInPlace = Number(sub.totalVoted || sub.voted || 0);
-                    const collectedFromHome = Number(sub.totalVotedFromHome || sub.votedFromHome || 0);
+                    const collectedFromHome = Number(sub.votedFromHome || 0);
                     regionCollectedInPlaceSum += collectedInPlace;
                     regionCollectedFromHomeSum += collectedFromHome;
                     const stats = getResultStats(sub, candidateIds);
@@ -2680,17 +2792,22 @@
                     const regEl = document.getElementById(`results-registered-place-${sub.id}`);
                     const colInPlaceEl = document.getElementById(`results-voted-in-place-place-${sub.id}`);
                     const colFromHomeEl = document.getElementById(`results-voted-from-home-place-${sub.id}`);
+                    const colTotalEl = document.getElementById(`results-voted-total-place-${sub.id}`);
                     if (regEl) regEl.textContent = formatNumber(regCount);
                     if (colInPlaceEl) colInPlaceEl.textContent = formatNumber(collectedInPlace);
                     if (colFromHomeEl) colFromHomeEl.textContent = formatNumber(collectedFromHome);
+                    if (colTotalEl) colTotalEl.textContent = formatNumber(collectedInPlace + collectedFromHome);
+                    updateRowBallotCells(`place-${sub.id}`, sub.result, collectedInPlace + collectedFromHome);
                     updateCandidateCells(`place-${sub.id}`, 'results', stats.votes, stats.total);
+                    updateActivityCell(`place-${sub.id}`, sub);
                   });
+                  updateRowBallotCells(`mun-${region.id}-${place.id}`, place.result, (place.totalVoted || place.voted || 0) + Number(place.votedFromHome || 0));
                   updateCandidateCells(`mun-${region.id}-${place.id}`, 'results', parentCandidateTotals, parentResultSum);
                 } else {
                   const regCount = Number(place.registeredVoters || 0);
                   regionRegisteredSum += regCount;
                   const collectedInPlace = Number(place.totalVoted || place.voted || 0);
-                  const collectedFromHome = Number(place.totalVotedFromHome || place.votedFromHome || 0);
+                  const collectedFromHome = Number(place.votedFromHome || 0);
                   regionCollectedInPlaceSum += collectedInPlace;
                   regionCollectedFromHomeSum += collectedFromHome;
                   const stats = getResultStats(place, candidateIds);
@@ -2700,10 +2817,14 @@
                   const regEl = document.getElementById(`results-registered-place-${place.id}`);
                   const colInPlaceEl = document.getElementById(`results-voted-in-place-place-${place.id}`);
                   const colFromHomeEl = document.getElementById(`results-voted-from-home-place-${place.id}`);
+                  const colTotalEl = document.getElementById(`results-voted-total-place-${place.id}`);
                   if (regEl) regEl.textContent = formatNumber(regCount);
                   if (colInPlaceEl) colInPlaceEl.textContent = formatNumber(collectedInPlace);
                   if (colFromHomeEl) colFromHomeEl.textContent = formatNumber(collectedFromHome);
+                  if (colTotalEl) colTotalEl.textContent = formatNumber(collectedInPlace + collectedFromHome);
+                  updateRowBallotCells(`place-${place.id}`, place.result, collectedInPlace + collectedFromHome);
                   updateCandidateCells(`place-${place.id}`, 'results', stats.votes, stats.total);
+                  updateActivityCell(`place-${place.id}`, place);
                 }
               });
             }
@@ -2711,11 +2832,15 @@
             const regionRegEl = document.getElementById(`results-registered-region-${region.id}`);
             const regionInPlaceEl = document.getElementById(`results-voted-in-place-region-${region.id}`);
             const regionFromHomeEl = document.getElementById(`results-voted-from-home-region-${region.id}`);
+            const regionTotalEl = document.getElementById(`results-voted-total-region-${region.id}`);
             if (regionRegEl) regionRegEl.innerHTML = formatRegisteredWithRik(regionRegisteredSum, region.RIK_totalRegionRegisteredVoters);
             if (regionInPlaceEl) regionInPlaceEl.textContent = formatNumber(regionCollectedInPlaceSum);
             if (regionFromHomeEl) regionFromHomeEl.textContent = formatNumber(regionCollectedFromHomeSum);
+            if (regionTotalEl) regionTotalEl.textContent = formatNumber(regionCollectedInPlaceSum + regionCollectedFromHomeSum);
+            updateRowBallotCells(`region-${region.id}`, region.result, regionCollectedInPlaceSum + regionCollectedFromHomeSum);
             updateCandidateCells(`region-${region.id}`, 'results', regionCandidateTotals, regionResultSum);
           });
+          globalThis.refreshResultsBallotValidation?.();
         }
 
         const summaryResponse = await fetch('/api/summary');
@@ -2881,7 +3006,7 @@
                   munReg += regCount;
                   regionRegisteredSum += regCount;
                   const collectedInPlace = Number(place.totalVoted || place.voted || 0);
-                  const collectedFromHome = Number(place.totalVotedFromHome || place.votedFromHome || 0);
+                  const collectedFromHome = Number(place.votedFromHome || 0);
                   const collected = collectedInPlace + collectedFromHome;
                   munCollectedInPlace += collectedInPlace;
                   munCollectedFromHome += collectedFromHome;
@@ -2929,7 +3054,7 @@
                     const regCount = Number(sub.registeredVoters || 0);
                     regionRegisteredSum += regCount;
                     const collectedInPlace = Number(sub.totalVoted || sub.voted || 0);
-                    const collectedFromHome = Number(sub.totalVotedFromHome || sub.votedFromHome || 0);
+                    const collectedFromHome = Number(sub.votedFromHome || 0);
                     const collected = collectedInPlace + collectedFromHome;
                     regionCollectedInPlaceSum += collectedInPlace;
                     regionCollectedFromHomeSum += collectedFromHome;
@@ -2952,7 +3077,7 @@
                   const regCount = Number(place.registeredVoters || 0);
                   regionRegisteredSum += regCount;
                   const collectedInPlace = Number(place.totalVoted || place.voted || 0);
-                  const collectedFromHome = Number(place.totalVotedFromHome || place.votedFromHome || 0);
+                  const collectedFromHome = Number(place.votedFromHome || 0);
                   const collected = collectedInPlace + collectedFromHome;
                   regionCollectedInPlaceSum += collectedInPlace;
                   regionCollectedFromHomeSum += collectedFromHome;

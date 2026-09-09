@@ -46,12 +46,12 @@ function findSenderRegistration(config, sender) {
     for (const place of places || []) {
       const senderEntry = Array.isArray(place.sender) ? place.sender[0] : null;
       if (senderEntry && String(senderEntry.signalUser || '').trim().toLowerCase() === normalizedSender) {
-        return { placeId: String(place.id || ''), placeName: String(place.name || place.id || ''), regionName, municipalityName };
+        return { placeId: String(place.id || ''), placeName: String(place.name || place.id || ''), regionName, municipalityName, registeredVoters: Number(place.registeredVoters) || 0 };
       }
       for (const sub of place.subPlaces || []) {
         const subEntry = Array.isArray(sub.sender) ? sub.sender[0] : null;
         if (subEntry && String(subEntry.signalUser || '').trim().toLowerCase() === normalizedSender) {
-          return { placeId: String(sub.id || ''), placeName: String(sub.name || sub.id || ''), regionName, municipalityName };
+          return { placeId: String(sub.id || ''), placeName: String(sub.name || sub.id || ''), regionName, municipalityName, registeredVoters: Number(sub.registeredVoters) || 0 };
         }
       }
     }
@@ -126,7 +126,8 @@ function applyRegistrationMessage(config, sender, placeId) {
       sender: String(sender || 'TBD'),
       regionName: context.regionName || null,
       municipalityName: context.municipalityName || null,
-      placeName: context.placeName || String(placeId)
+      placeName: context.placeName || String(placeId),
+      registeredVoters: Number(place.registeredVoters) || 0
     };
   } catch (err) {
     console.error('Failed to save config after registration message:', err.message);
@@ -137,7 +138,7 @@ function applyRegistrationMessage(config, sender, placeId) {
 function buildRegistrationAcceptedReply(registration, options = {}) {
   const prependRecipientName = Boolean(options.prependRecipientName);
   const recipientName = String(options.recipientName || '').trim();
-  const template = getI18nUiString('sr', 'signalRegistrationAcceptedReply', 'Ваша регистрација за бирачко место {location} је успешно активирана.');
+  const template = getI18nUiString('sr', 'signalRegistrationAcceptedReply', 'Регистровани сте као контролор на бирачком месту,\n"{placeName}".\nБрој регистрованих бирача је {registeredVoters}.');
   const placeName = String(registration.placeName || registration.placeId || 'N/A');
   const municipalityName = String(registration.municipalityName || '').trim();
   const regionName = String(registration.regionName || '').trim();
@@ -159,14 +160,32 @@ function buildRegistrationAcceptedReply(registration, options = {}) {
     votingPlaceName: placeName,
     votingMunicipality: municipalityName,
     votingRegion: regionName,
-    location: locationParts.join(', ')
+    location: locationParts.join(', '),
+    placeName,
+    municipalityName,
+    registeredVoters: String(Number(registration.registeredVoters) || 0)
   });
 
+  return prependRecipientName && recipientName ? `${recipientName}, ${baseMessage}` : baseMessage;
+}
+
+function buildRegistrationQueryReply(registration, options = {}) {
+  const prependRecipientName = Boolean(options.prependRecipientName);
+  const recipientName = String(options.recipientName || '').trim();
+  const template = getI18nUiString('sr', 'signalRegistrationQueryReply',
+    'Регистровани сте као контролор на бирачком месту,\n"{placeName}".\nБрој регистрованих бирача је {registeredVoters}.');
+  const baseMessage = fillTemplate(template, {
+    placeName: String(registration && registration.placeName || registration && registration.placeId || 'N/A'),
+    municipalityName: String(registration && registration.municipalityName || '').trim(),
+    registeredVoters: String(Number(registration && registration.registeredVoters) || 0)
+  });
   return prependRecipientName && recipientName ? `${recipientName}, ${baseMessage}` : baseMessage;
 }
 
 module.exports = {
   type: 'register-controller',
   applyRegistrationMessage,
-  buildRegistrationAcceptedReply
+  buildRegistrationAcceptedReply,
+  buildRegistrationQueryReply,
+  findSenderRegistration
 };

@@ -28,8 +28,7 @@ function walkPlaceVote(place) {
   if (Array.isArray(place.subPlaces)) {
     const subtotal = place.subPlaces.reduce((sum, sub) => sum + walkPlaceVote(sub), 0);
     place.totalVoted = subtotal;
-    const homeSubtotal = place.subPlaces.reduce((sum, sub) => sum + walkPlaceVoteFromHome(sub), 0);
-    place.totalVotedFromHome = homeSubtotal + toNumber(place.votedFromHome, 0);
+    place.votedFromHome = place.subPlaces.reduce((sum, sub) => sum + walkPlaceVoteFromHome(sub), 0);
     return subtotal;
   }
   const value = toNumber(place.voted, 0);
@@ -37,7 +36,6 @@ function walkPlaceVote(place) {
   place.voted = value;
   place.totalVoted = value;
   place.votedFromHome = homeValue;
-  place.totalVotedFromHome = homeValue;
   return value;
 }
 
@@ -45,12 +43,11 @@ function walkPlaceVoteFromHome(place) {
   if (!place || typeof place !== 'object') return 0;
   if (Array.isArray(place.subPlaces)) {
     const subtotal = place.subPlaces.reduce((sum, sub) => sum + walkPlaceVoteFromHome(sub), 0);
-    place.totalVotedFromHome = subtotal + toNumber(place.votedFromHome, 0);
-    return place.totalVotedFromHome;
+    place.votedFromHome = subtotal + toNumber(place.votedFromHome, 0);
+    return place.votedFromHome;
   }
   const value = toNumber(place.votedFromHome, 0);
   place.votedFromHome = value;
-  place.totalVotedFromHome = value;
   return value;
 }
 
@@ -69,7 +66,7 @@ function syncConfigVoteTotals(node) {
         munTotal += placeTotal;
       });
       mun.totalVoted = munTotal;
-      mun.totalVotedFromHome = (mun.places || []).reduce((sum, place) => sum + toNumber(place.totalVotedFromHome, 0), 0) + toNumber(mun.votedFromHome, 0);
+      mun.votedFromHome = (mun.places || []).reduce((sum, place) => sum + toNumber(place.votedFromHome, 0), 0);
       total += munTotal;
     });
   }
@@ -80,7 +77,7 @@ function syncConfigVoteTotals(node) {
       if (Array.isArray(place.subPlaces)) {
         const subTotal = place.subPlaces.reduce((sum, sub) => sum + walkPlaceVote(sub), 0);
         place.totalVoted = subTotal;
-        place.totalVotedFromHome = place.subPlaces.reduce((sum, sub) => sum + toNumber(sub.totalVotedFromHome, 0), 0) + toNumber(place.votedFromHome, 0);
+        place.votedFromHome = place.subPlaces.reduce((sum, sub) => sum + toNumber(sub.votedFromHome, 0), 0);
         total += subTotal;
       } else {
         const placeTotal = walkPlaceVote(place);
@@ -108,12 +105,60 @@ function syncConfigVoteTotals(node) {
   }
 
   node.totalVoted = total;
-  node.totalVotedFromHome = toNumber(node.votedFromHome, 0) + (Array.isArray(node.places) ? node.places.reduce((sum, place) => sum + toNumber(place.totalVotedFromHome, 0), 0) : 0)
-    + (Array.isArray(node.municipalities) ? node.municipalities.reduce((sum, mun) => sum + toNumber(mun.totalVotedFromHome, 0), 0) : 0)
-    + (Array.isArray(node.regions) ? node.regions.reduce((sum, region) => sum + toNumber(region.totalVotedFromHome, 0), 0) : 0)
-    + (Array.isArray(node.votingUnits) ? node.votingUnits.reduce((sum, unit) => sum + toNumber(unit.totalVotedFromHome, 0), 0) : 0)
-    + (Array.isArray(node.subPlaces) ? node.subPlaces.reduce((sum, sub) => sum + toNumber(sub.totalVotedFromHome, 0), 0) : 0);
+  node.votedFromHome = (Array.isArray(node.places) ? node.places.reduce((sum, place) => sum + toNumber(place.votedFromHome, 0), 0) : 0)
+    + (Array.isArray(node.municipalities) ? node.municipalities.reduce((sum, mun) => sum + toNumber(mun.votedFromHome, 0), 0) : 0)
+    + (Array.isArray(node.regions) ? node.regions.reduce((sum, region) => sum + toNumber(region.votedFromHome, 0), 0) : 0)
+    + (Array.isArray(node.votingUnits) ? node.votingUnits.reduce((sum, unit) => sum + toNumber(unit.votedFromHome, 0), 0) : 0)
+    + (Array.isArray(node.subPlaces) ? node.subPlaces.reduce((sum, sub) => sum + toNumber(sub.votedFromHome, 0), 0) : 0);
   return total;
+}
+
+function syncConfigResultTotals(config) {
+  const templates = Array.isArray(config && config.result && config.result.candidateVotes)
+    ? config.result.candidateVotes
+    : [];
+  const candidateIds = templates.map((candidate) => String(candidate.id));
+
+  function merge(target, source) {
+    source.forEach((votes, id) => target.set(id, (target.get(id) || 0) + votes));
+  }
+
+  function visit(node) {
+    if (!node || typeof node !== 'object') return new Map();
+
+    const children = [];
+    (node.municipalities || []).forEach((child) => children.push(child));
+    (node.regions || []).forEach((child) => children.push(child));
+    (node.votingUnits || []).forEach((child) => children.push(child));
+    (node.places || []).forEach((place) => {
+      if (Array.isArray(place.subPlaces) && place.subPlaces.length) place.subPlaces.forEach((child) => children.push(child));
+      else children.push(place);
+    });
+
+    if (!children.length) {
+      node.result = node.result && typeof node.result === 'object' ? node.result : {};
+      node.result.nonRegularBallots = toNumber(node.result.nonRegularBallots, 0);
+      node.result.remainingBallots = toNumber(node.result.remainingBallots, 0);
+      return new Map((node.result && node.result.candidateVotes || []).map((candidate) => [
+        String(candidate.id),
+        toNumber(candidate.votes, 0)
+      ]));
+    }
+
+    const totals = new Map(candidateIds.map((id) => [id, 0]));
+    children.forEach((child) => merge(totals, visit(child)));
+    const existing = new Map((node.result && node.result.candidateVotes || []).map((candidate) => [String(candidate.id), candidate]));
+    node.result = node.result && typeof node.result === 'object' ? node.result : {};
+    node.result.candidateVotes = candidateIds.map((id) => {
+      const source = existing.get(id) || templates.find((candidate) => String(candidate.id) === id) || { id };
+      return { ...source, id, votes: totals.get(id) || 0 };
+    });
+    node.result.nonRegularBallots = children.reduce((sum, child) => sum + toNumber(child.result && child.result.nonRegularBallots, 0), 0);
+    node.result.remainingBallots = children.reduce((sum, child) => sum + toNumber(child.result && child.result.remainingBallots, 0), 0);
+    return totals;
+  }
+
+  visit(config);
 }
 
 function loadI18n() {
@@ -152,6 +197,11 @@ function loadConfig() {
       cfg.templates = cfg.templates || [];
     }
     syncConfigVoteTotals(cfg);
+    const resultTreeBeforeSync = JSON.stringify(cfg.result || null);
+    syncConfigResultTotals(cfg);
+    if (JSON.stringify(cfg.result || null) !== resultTreeBeforeSync) {
+      saveConfig(cfg);
+    }
     return cfg;
   } catch (err) {
     console.error('Failed to load config.json:', err.message);
@@ -472,6 +522,23 @@ function addRawSignalMessage({ direction, rawPayload, groupId = null, groupName 
   return record;
 }
 
+function isRecentServerOutgoingSignalMessage(text, groupId) {
+  const normalizedText = String(text || '').trim();
+  if (!normalizedText) return false;
+  const cutoff = Date.now() - 120000;
+  return loadSignalRawMessages().some((record) => {
+    if (record.direction !== 'outgoing' || record.source !== 'local-server-send') return false;
+    if (new Date(record.receivedAt).getTime() < cutoff) return false;
+    if (record.groupId !== groupId) return false;
+    try {
+      const payload = JSON.parse(record.rawPayload || '{}');
+      return String(payload.params && payload.params.message || '').trim() === normalizedText;
+    } catch (err) {
+      return false;
+    }
+  });
+}
+
 function saveConfig(config) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
 }
@@ -504,6 +571,27 @@ function getI18nUiString(languageCode, key, fallback = '') {
   const ui = language && language.ui && typeof language.ui === 'object' ? language.ui : null;
   const value = ui && typeof ui[key] === 'string' ? ui[key].trim() : '';
   return value || fallback;
+}
+
+function getI18nCommandHelp(languageCode, commandName) {
+  const i18n = loadI18n();
+  const language = i18n && i18n.multiLanguage && i18n.multiLanguage[languageCode]
+    ? i18n.multiLanguage[languageCode]
+    : null;
+  const ui = language && language.ui && typeof language.ui === 'object' ? language.ui : null;
+  const table = ui && ui.signalCommandHelp && typeof ui.signalCommandHelp === 'object' ? ui.signalCommandHelp : null;
+  if (!table) return null;
+  const normalized = String(commandName || '').trim().toLowerCase();
+  if (!normalized) return null;
+  const key = Object.keys(table).find((k) => k.toLowerCase() === normalized);
+  if (!key) return null;
+  const entry = table[key] || {};
+  return {
+    name: key,
+    description: String(entry.description || ''),
+    format: String(entry.format || ''),
+    example: String(entry.example || '')
+  };
 }
 
 function fillTemplate(template, replacements) {
@@ -549,6 +637,8 @@ async function sendSignalReply({ groupId, recipientNumber, messageText }) {
 }
 
 const buildRegistrationAcceptedReply = (...args) => messageModules.registerController.buildRegistrationAcceptedReply(...args);
+const buildRegistrationQueryReply = (...args) => messageModules.registerController.buildRegistrationQueryReply(...args);
+const findRegisteredController = (...args) => messageModules.registerController.findSenderRegistration(...args);
 
 const buildIzlaznostAcceptedReply = (...args) => messageModules.izlaznost.buildIzlaznostAcceptedReply(...args);
 const buildIzlaznostQueryReply = (...args) => messageModules.izlaznost.buildIzlaznostQueryReply(...args);
@@ -573,9 +663,33 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
   }
 
   if (matched.type === 'register-controller') {
-    const placeId = matched.fields.placeId;
+    const placeId = String(matched.fields.placeId || '').trim();
+    if (!placeId) {
+      const registration = findRegisteredController(config, sender);
+      const i18n = config.multiLanguage || {};
+      const templateKey = registration
+        ? 'signalRegistrationQueryReply'
+        : 'signalRegistrationNotRegisteredReply';
+      const fallback = registration
+        ? 'Регистровани сте као контролор на бирачком месту,\n"{placeName}".\nБрој регистрованих бирача је **{registeredVoters}**.'
+        : 'Нисте регистровани ни на једном бирачком месту.';
+      const replyText = registration
+        ? buildRegistrationQueryReply(registration, {
+          prependRecipientName: !senderNumber && Boolean(groupId),
+          recipientName: sender
+        })
+        : fillTemplate(getI18nUiString('sr', templateKey, fallback), {});
+      const finalReplyText = !registration && !senderNumber && groupId && sender
+        ? `${sender}, ${replyText}`
+        : replyText;
+      if (senderNumber || groupId) {
+        await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: finalReplyText });
+      }
+      return { accepted: Boolean(registration), queryOnly: true, registered: Boolean(registration) };
+    }
     const registration = applyRegistrationMessage(config, sender, placeId);
     if (!registration.ok) {
+      console.warn('Registration failed:', registration.reason, 'placeId=', placeId, 'sender=', sender);
       const i18n = config.multiLanguage || {};
       let rejectText = null;
 
@@ -602,6 +716,16 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
           rejectText = fillTemplate(template, { location });
         }
 
+        if (!senderNumber && groupId && sender) rejectText = `${sender}, ${rejectText}`;
+        if (senderNumber || groupId) {
+          await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: rejectText });
+        }
+      }
+
+      if (!rejectText) {
+        const template = getI18nUiString('sr', 'signalRegistrationFailedReply',
+          'Регистрација није прихваћена. Проверите ID бирачког места и покушајте поново.');
+        rejectText = fillTemplate(template, { placeId });
         if (!senderNumber && groupId && sender) rejectText = `${sender}, ${rejectText}`;
         if (senderNumber || groupId) {
           await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: rejectText });
@@ -670,7 +794,7 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
   }
 
   const votePlace = findPlaceConfigBySender(config, senderCfg.region, senderCfg.municipality, senderCfg.place);
-  if (votePlace && String(votePlace.senderStatus) === '0' && matched.type !== 'status') {
+  if (votePlace && String(votePlace.senderStatus) === '0' && matched.type !== 'status' && matched.type !== 'help') {
     const i18n = loadI18n();
     const msg = (i18n.multiLanguage && i18n.multiLanguage.sr && i18n.multiLanguage.sr.ui &&
       i18n.multiLanguage.sr.ui.signalStatusZeroReply) ||
@@ -680,6 +804,65 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
       await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
     }
     return { accepted: false, reason: 'sender-status-zero' };
+  }
+
+  if (matched.type === 'help') {
+    const requestedName = String(matched.fields.commandName || '').trim();
+    const commandNames = (Array.isArray(config.templates) ? config.templates : [])
+      .map((t) => String(t.name || '').trim())
+      .filter(Boolean);
+
+    let replyText;
+    if (requestedName) {
+      const commandHelp = getI18nCommandHelp('sr', requestedName);
+      if (commandHelp) {
+        const template = getI18nUiString('sr', 'signalHelpDetailReply',
+          'Команда: {name}\nОпис: {description}\nФормат: {format}\nПример: {example}');
+        replyText = fillTemplate(template, commandHelp);
+      } else {
+        const template = getI18nUiString('sr', 'signalHelpUnknownCommand',
+          "Непозната команда: {name}. Пошаљите '?:' за листу доступних команди.");
+        replyText = fillTemplate(template, { name: requestedName });
+      }
+    } else {
+      const commandsList = commandNames.join(', ');
+      const template = getI18nUiString('sr', 'signalHelpReply', 'Доступне команде: {commands}');
+      replyText = fillTemplate(template, { commands: commandsList });
+    }
+    if (!senderNumber && groupId) replyText = `${sender}, ${replyText}`;
+
+    const record = addAcceptedSignalRecord({
+      sender,
+      text,
+      groupId,
+      groupName,
+      direction,
+      region: senderCfg.region,
+      place: senderCfg.place,
+      type: matched.type,
+      payload: { commandName: requestedName || null }
+    });
+
+    if (senderNumber || groupId) {
+      const replyStatus = await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
+      if (replyStatus.ok) {
+        addAcceptedSignalRecord({
+          sender: 'local-backend',
+          text: replyText,
+          groupId,
+          groupName,
+          direction: 'outgoing',
+          region: senderCfg.region || null,
+          place: senderCfg.place || null,
+          type: 'help-reply',
+          payload: { commands: commandNames, requestedCommand: requestedName || null }
+        });
+      } else {
+        console.warn('Help reply could not be sent:', replyStatus.reason || 'unknown-error');
+      }
+    }
+
+    return { accepted: true, record };
   }
 
   const parsedPayload = {};
@@ -702,6 +885,24 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
         return { accepted: false, reason: 'invalid-home-count' };
       }
       parsedPayload[k] = n;
+    } else if (k === 'homeOnly') {
+      if (v === undefined || v === null || String(v).trim() === '') {
+        continue;
+      }
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n)) {
+        return { accepted: false, reason: 'invalid-home-count' };
+      }
+      parsedPayload.homeCount = n;
+    } else if (k === 'countOnly') {
+      if (v === undefined || v === null || String(v).trim() === '') {
+        continue;
+      }
+      const n = parseInt(v, 10);
+      if (Number.isNaN(n)) {
+        return { accepted: false, reason: 'invalid-count' };
+      }
+      parsedPayload.count = n;
     } else {
       parsedPayload[k] = v;
     }
@@ -731,8 +932,10 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
   }
 
   if (votePlace && matched.type === 'izlaznost') {
-    const hasCountUpdate = matched.fields.count !== undefined && matched.fields.count !== null && String(matched.fields.count).trim() !== '';
-    const hasHomeUpdate = matched.fields.homeCount !== undefined && matched.fields.homeCount !== null && String(matched.fields.homeCount).trim() !== '';
+    const hasCountUpdate = (matched.fields.count !== undefined && matched.fields.count !== null && String(matched.fields.count).trim() !== '') ||
+      (matched.fields.countOnly !== undefined && matched.fields.countOnly !== null && String(matched.fields.countOnly).trim() !== '');
+    const hasHomeUpdate = (matched.fields.homeCount !== undefined && matched.fields.homeCount !== null && String(matched.fields.homeCount).trim() !== '') ||
+      (matched.fields.homeOnly !== undefined && matched.fields.homeOnly !== null && String(matched.fields.homeOnly).trim() !== '');
 
     if (!hasCountUpdate && !hasHomeUpdate) {
       const responseCount = toNumber(votePlace.voted, 0);
@@ -779,7 +982,7 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
       return { accepted: false, reason: 'config-save-failed' };
     }
 
-    const replyText = buildIzlaznostAcceptedReply(senderCfg, {
+    const replyText = buildIzlaznostAcceptedReply({ ...senderCfg, place: votePlace }, {
       prependRecipientName: !senderNumber && Boolean(groupId),
       recipientName: sender,
       count: nextCount,
@@ -845,18 +1048,55 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
     }
   }
 
-  if (votePlace && matched.type === 'rezultati' && matched.fields.pairs) {
-    const pairs = parseRezPairs(matched.fields.pairs);
+  if (votePlace && matched.type === 'rezultati') {
+    const pairsText = String(matched.fields.pairs || '').trim();
+    if (!pairsText) {
+      const replyText = messageModules.rezultati.buildRezultatiQueryReply(votePlace.result, {
+        prependRecipientName: !senderNumber && Boolean(groupId),
+        recipientName: sender
+      });
+      if (senderNumber || groupId) {
+        const replyStatus = await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
+        if (replyStatus.ok) {
+          addAcceptedSignalRecord({
+            sender: 'local-backend',
+            text: replyText,
+            groupId,
+            groupName,
+            direction: 'outgoing',
+            region: senderCfg.region || null,
+            place: senderCfg.place || null,
+            type: 'rezultati-query-reply',
+            payload: { result: votePlace.result }
+          });
+        }
+      }
+      return { accepted: true, record };
+    }
+
+    const pairs = parseRezPairs(pairsText);
     if (!pairs.length) {
       return { accepted: false, reason: 'invalid-rez-pairs' };
     }
 
     const updatedIds = [];
-    const candidateVotes = votePlace.result && Array.isArray(votePlace.result.candidateVotes)
+    const result = votePlace.result && typeof votePlace.result === 'object' ? votePlace.result : {};
+    votePlace.result = result;
+    const candidateVotes = Array.isArray(result.candidateVotes)
       ? votePlace.result.candidateVotes
       : [];
 
     for (const { id, votes } of pairs) {
+      if (id === 'N') {
+        result.nonRegularBallots = votes;
+        updatedIds.push(id);
+        continue;
+      }
+      if (id === 'P') {
+        result.remainingBallots = votes;
+        updatedIds.push(id);
+        continue;
+      }
       const entry = candidateVotes.find((cv) => String(cv.id) === String(id));
       if (entry) {
         entry.votes = votes;
@@ -869,13 +1109,14 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
     }
 
     try {
+      syncConfigResultTotals(config);
       saveConfig(config);
     } catch (err) {
       console.error('Failed to save config with updated rezultati:', err.message);
       return { accepted: false, reason: 'config-save-failed' };
     }
 
-    const replyText = buildRezultatiAcceptedReply(updatedIds, {
+    const replyText = buildRezultatiAcceptedReply(votePlace.result, {
       prependRecipientName: !senderNumber && Boolean(groupId),
       recipientName: sender
     });
@@ -934,7 +1175,8 @@ function normalizeSignalEnvelope(rawEnvelope) {
     text: String(text).trim(),
     groupId: groupInfo && (groupInfo.groupId || groupInfo.id) ? String(groupInfo.groupId || groupInfo.id) : null,
     groupName: groupInfo && (groupInfo.groupName || groupInfo.name) ? String(groupInfo.groupName || groupInfo.name) : null,
-    timestamp: envelope.timestamp || Date.now()
+    timestamp: envelope.timestamp || Date.now(),
+    isSyncSent: Boolean(sentMessage)
   };
 }
 
@@ -1058,6 +1300,9 @@ async function startSignalCaptureLoop() {
       });
       const payload = normalizeSignalEnvelope(item);
       if (!payload) continue;
+      if (payload.isSyncSent && isRecentServerOutgoingSignalMessage(payload.text, payload.groupId)) {
+        continue;
+      }
       const result = await handleIncomingMessageProcessing({
         sender: payload.sender,
         senderNumber: payload.senderNumber,
@@ -1852,7 +2097,7 @@ app.get('/api/summary', (req, res) => {
   const regions = getRegions(config);
   regions.forEach(region => {
     const regionValueInPlace = toNumber(region.totalVoted, 0);
-    const regionValueFromHome = toNumber(region.totalVotedFromHome, 0);
+    const regionValueFromHome = toNumber(region.votedFromHome, 0);
     const regionValue = regionValueInPlace + regionValueFromHome;
     regionTotals[region.name] = regionValue;
     regionTotalsInPlace[region.name] = regionValueInPlace;
@@ -1865,7 +2110,7 @@ app.get('/api/summary', (req, res) => {
       region.municipalities.forEach(mun => {
         (mun.places || []).forEach(place => {
           const placeValueInPlace = toNumber(place.totalVoted, place.voted || 0);
-          const placeValueFromHome = toNumber(place.totalVotedFromHome, place.votedFromHome || 0);
+          const placeValueFromHome = toNumber(place.votedFromHome, 0);
           const placeValue = placeValueInPlace + placeValueFromHome;
           placeTotals[`${region.name} / ${place.name}`] = placeValue;
           placeTotalsInPlace[`${region.name} / ${place.name}`] = placeValueInPlace;
@@ -1879,7 +2124,7 @@ app.get('/api/summary', (req, res) => {
         if (Array.isArray(place.subPlaces)) {
           place.subPlaces.forEach(sub => {
             const subValueInPlace = toNumber(sub.totalVoted, sub.voted || 0);
-            const subValueFromHome = toNumber(sub.totalVotedFromHome, sub.votedFromHome || 0);
+            const subValueFromHome = toNumber(sub.votedFromHome, 0);
             const subValue = subValueInPlace + subValueFromHome;
             placeTotals[`${region.name} / ${sub.name}`] = subValue;
             placeTotalsInPlace[`${region.name} / ${sub.name}`] = subValueInPlace;
@@ -1887,7 +2132,7 @@ app.get('/api/summary', (req, res) => {
           });
         } else {
           const placeValueInPlace = toNumber(place.totalVoted, place.voted || 0);
-          const placeValueFromHome = toNumber(place.totalVotedFromHome, place.votedFromHome || 0);
+          const placeValueFromHome = toNumber(place.votedFromHome, 0);
           const placeValue = placeValueInPlace + placeValueFromHome;
           placeTotals[`${region.name} / ${place.name}`] = placeValue;
           placeTotalsInPlace[`${region.name} / ${place.name}`] = placeValueInPlace;

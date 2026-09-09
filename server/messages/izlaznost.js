@@ -20,7 +20,6 @@ function applyIzlaznostMessage(config, sender, count, homeCount = null) {
   place.totalVoted = nextCount;
   if (homeCount !== null && homeCount !== undefined) {
     place.votedFromHome = nextHomeCount;
-    place.totalVotedFromHome = nextHomeCount;
   }
   return {
     ok: true,
@@ -132,10 +131,13 @@ function buildIzlaznostAcceptedReply(senderCfg, options = {}) {
   const template = getI18nUiString(
     'sr',
     'signalIzlaznostAcceptedReply',
-    'Ажурирање излазности на бирачком месту {location} је прихваћено. У месту: {count}, од куће: {votedFromHome}.'
+    'За бирачко место "{placeName}", "{municipalityName}", са регистрованих {registeredVoters} гласача, успешно је ажурирана промена броја изашлих:\nНа бирачком месту: {count}\nОд куће: {votedFromHome}'
   );
   const baseMessage = fillTemplate(template, {
     location: buildLocationText(placeName, municipalityName, regionName),
+    placeName,
+    municipalityName,
+    registeredVoters: String(normalizeNumeric(place.registeredVoters, 0)),
     count: String(normalizeNumeric(options.count ?? place.voted ?? 0, 0)),
     votedFromHome: String(normalizeNumeric(options.homeCount ?? place.votedFromHome, 0))
   });

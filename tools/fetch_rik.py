@@ -121,7 +121,13 @@ def extract_select_options(page, keywords):
         return null;
       }
       const keys = {keywords};
-      const sel = findByKeywords(keys) || selects[0] || null;
+            const joinedKeys = keys.join(' ').toLowerCase();
+            const exactId = joinedKeys.includes('region')
+                ? 'election-region-select'
+                : joinedKeys.includes('municip') || joinedKeys.includes('opst')
+                    ? 'election-municipality-select'
+                    : null;
+            const sel = (exactId && document.getElementById(exactId)) || findByKeywords(keys) || selects[0] || null;
       if (!sel) return null;
       const options = Array.from(sel.options || []).map(o => ({ value: o.value, text: o.text.trim() }));
       return { selectId: sel.id || null, selectName: sel.name || null, options };
@@ -304,10 +310,90 @@ def select_option_by_value(page, select_id, value):
     except Exception:
         # fallback to JS
         try:
-            page.evaluate("(function(id,v){ const s = document.getElementById(id); if (!s) return false; s.value=v; s.dispatchEvent(new Event('change',{bubbles:true})); return true;})(arguments[0], arguments[1])", select_id, value)
-            return True
+            return bool(page.evaluate("""(function(id,v){
+                const s = document.getElementById(id);
+                if (!s || !Array.from(s.options || []).some(o => String(o.value) === String(v))) return false;
+                s.value = v;
+                s.dispatchEvent(new Event('change',{bubbles:true}));
+                return true;
+            })(arguments[0], arguments[1])""", select_id, value))
         except Exception:
             return False
+
+
+def select_option_by_label(page, select_id, label):
+    """Select an option by its visible label in the specified control."""
+    if not select_id or not label:
+        return False
+    try:
+        page.select_option(f'#{select_id}', label=label)
+        return True
+    except Exception:
+        return False
+
+
+def wait_for_select_value(page, select_id, value, text=None, timeout_ms=10000):
+    """Confirm that the requested option or visible label is selected."""
+    if not select_id:
+        return False
+    try:
+        return bool(page.evaluate(
+            """({selectId, value, text}) => {
+                const select = document.getElementById(selectId);
+                if (!select) return false;
+                if (String(select.value) === String(value)) return true;
+                const selected = select.options[select.selectedIndex];
+                const normalize = input => (input || '').normalize('NFKC')
+                    .replace(/\\u00a0/g, ' ')
+                    .replace(/\\s+/g, ' ')
+                    .trim()
+                    .toLocaleLowerCase();
+                return !!text && !!selected && normalize(selected.text) === normalize(text);
+            }""",
+            {"selectId": select_id, "value": value, "text": text},
+        ))
+    except Exception:
+        return False
+
+
+def selected_option_debug(page, select_id):
+    """Return the live selected option for a useful mismatch diagnostic."""
+    try:
+        return page.evaluate("""id => {
+            const select = document.getElementById(id);
+            if (!select) return {id, missing: true};
+            const option = select.options[select.selectedIndex];
+            return {
+                id,
+                value: select.value,
+                text: option ? option.text : null,
+                options: Array.from(select.options || []).map(o => ({value: o.value, text: o.text}))
+            };
+        }""", select_id)
+    except Exception as exc:
+        return {"id": select_id, "error": str(exc)}
+
+
+def select_options_signature(info):
+    if not info:
+        return None
+    return tuple((str(option.get('value')), option.get('text', '').strip())
+                 for option in info.get('options', []))
+
+
+def wait_for_options_refresh(page, keywords, previous_signature=None, timeout_ms=15000):
+    """Poll a dependent select until its option set is populated and refreshed."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        current = extract_select_options(page, keywords)
+        options = current.get('options', []) if current else []
+        signature = select_options_signature(current)
+        real_options = [option for option in options if option.get('value') and
+                        not is_placeholder_option_text(option.get('text'))]
+        if real_options and (previous_signature is None or signature != previous_signature):
+            return current
+        page.wait_for_timeout(100)
+    return None
 
 
 def select_option_by_visible_text(page, option_text, container_keywords=None):
@@ -554,6 +640,15 @@ def load_default_sender_statuses():
     ]
 
 
+def normalize_result(raw_result, candidate_votes):
+    result = dict(raw_result) if isinstance(raw_result, dict) else {}
+    result.setdefault('candidateVotes', candidate_votes)
+    result.setdefault('nonValidVotes', [{'id': '1', 'votes': 0}])
+    result['nonRegularBallots'] = as_int(result.get('nonRegularBallots')) or 0
+    result['remainingBallots'] = as_int(result.get('remainingBallots')) or 0
+    return result
+
+
 def post_process_config(raw_config, page=None, out_dir=None, checkpoints_dir=None):
     """Post-process raw scraped or assembled config.
     Computes summed parameters (totalRegisteredVoters, votingPlacesNumber, etc.) from the level below
@@ -611,12 +706,11 @@ def post_process_config(raw_config, page=None, out_dir=None, checkpoints_dir=Non
                         }
                     ]),
                     'matchScore': plc.get('matchScore', 0.0),
-                    'result': plc.get('result', {
+                    'result': normalize_result(plc.get('result', {
                         'candidateVotes': candidate_lists_lower,
                         'nonValidVotes': [{'id': '1', 'votes': 0}]
-                    }),
+                    }), candidate_lists_lower),
                     'totalVoted': plc.get('totalVoted', 0),
-                    'totalVotedFromHome': plc.get('totalVotedFromHome', 0)
                 }
                 processed_places.append(p_obj)
 
@@ -634,13 +728,12 @@ def post_process_config(raw_config, page=None, out_dir=None, checkpoints_dir=Non
                 'RIK_votingPlacesNumber': rik_mun_places,
                 'voted': mun.get('voted', 0),
                 'votedFromHome': mun.get('votedFromHome', 0),
-                'result': mun.get('result', {
+                'result': normalize_result(mun.get('result', {
                     'candidateVotes': candidate_lists_lower,
                     'nonValidVotes': [{'id': '1', 'votes': 0}]
-                }),
+                }), candidate_lists_lower),
                 'places': processed_places,
-                'totalVoted': mun.get('totalVoted', 0),
-                'totalVotedFromHome': mun.get('totalVotedFromHome', 0)
+                'totalVoted': mun.get('totalVoted', 0)
             }
             processed_muns.append(m_obj)
 
@@ -660,13 +753,12 @@ def post_process_config(raw_config, page=None, out_dir=None, checkpoints_dir=Non
             'RIK_votingRegionPlacesNumber': rik_reg_places,
             'voted': reg.get('voted', 0),
             'votedFromHome': reg.get('votedFromHome', 0),
-            'result': reg.get('result', {
+            'result': normalize_result(reg.get('result', {
                 'candidateVotes': candidate_lists_lower,
                 'nonValidVotes': [{'id': '1', 'votes': 0}]
-            }),
+            }), candidate_lists_lower),
             'municipalities': processed_muns,
-            'totalVoted': reg.get('totalVoted', 0),
-            'totalVotedFromHome': reg.get('totalVotedFromHome', 0)
+            'totalVoted': reg.get('totalVoted', 0)
         }
         processed_regions.append(r_obj)
 
@@ -683,12 +775,11 @@ def post_process_config(raw_config, page=None, out_dir=None, checkpoints_dir=Non
         'votingUnitsPlacesNumber': tot_places_count,
         'RIK_votingUnitsPlacesNumber': as_int(raw_config.get('RIK_votingUnitsPlacesNumber')) if isinstance(raw_config, dict) and as_int(raw_config.get('RIK_votingUnitsPlacesNumber')) else rik_tot_places,
         'totalVotingUnits': 1,
-        'result': raw_config.get('result', {
+        'result': normalize_result(raw_config.get('result', {
             'candidateVotes': candidate_lists_root
-        }) if isinstance(raw_config, dict) and 'result' in raw_config and raw_config['result'].get('candidateVotes') else {'candidateVotes': candidate_lists_root},
+        }) if isinstance(raw_config, dict) and 'result' in raw_config and raw_config['result'].get('candidateVotes') else {'candidateVotes': candidate_lists_root}, candidate_lists_root),
         'regions': processed_regions,
         'totalVoted': raw_config.get('totalVoted', 0) if isinstance(raw_config, dict) else 0,
-        'totalVotedFromHome': raw_config.get('totalVotedFromHome', 0) if isinstance(raw_config, dict) else 0,
         'senderStatuses': raw_config.get('senderStatuses', sender_statuses) if isinstance(raw_config, dict) else sender_statuses,
         'defaultLanguage': raw_config.get('defaultLanguage', 'sr') if isinstance(raw_config, dict) else 'sr',
         'multiLanguage': raw_config.get('multiLanguage', {}) if isinstance(raw_config, dict) else {},
@@ -776,17 +867,27 @@ def build_full_config(page, out_dir, region_filter=None, interactive=False, chec
         try:
             print(f"Processing region: {rname}")
             # select region
-            ok = select_option_by_value(page, region_select.get('selectId'), rv)
+            previous_municipality = extract_select_options(page, KEYWORDS_MUN)
+            previous_municipality_signature = select_options_signature(previous_municipality)
+            ok = select_option_by_label(page, region_select.get('selectId'), rname)
+            if not ok:
+                ok = select_option_by_value(page, region_select.get('selectId'), rv)
+            if not ok:
+                ok = select_option_by_visible_text(page, rname)
             if not ok and interactive:
                 input(f"Please select region '{rname}' in the browser then press Enter to continue...")
+                ok = True
             page.wait_for_timeout(600)
+            if ok and not wait_for_select_value(page, region_select.get('selectId'), rv, rname):
+                debug = selected_option_debug(page, region_select.get('selectId'))
+                raise RuntimeError(f"Region selection did not settle: {rname} ({rv}); live={debug}")
             region_totals = extract_page_totals(page)
             if region_totals.get('registeredVoters') is not None:
                 region_obj['RIK_totalRegionRegisteredVoters'] = region_totals['registeredVoters']
             if region_totals.get('votingPlaces') is not None:
                 region_obj['RIK_votingRegionPlacesNumber'] = region_totals['votingPlaces']
-            # extract municipalities
-            mun_info = extract_select_options(page, KEYWORDS_MUN)
+            # extract municipalities only after the region-dependent list refreshes
+            mun_info = wait_for_options_refresh(page, KEYWORDS_MUN, previous_municipality_signature)
             if not mun_info:
                 print(f"No municipality select for region {rname}; saving candidates and skipping.")
                 cand = extract_candidate_elements(page, KEYWORDS_MUN)
@@ -825,13 +926,23 @@ def build_full_config(page, out_dir, region_filter=None, interactive=False, chec
                         except Exception as e:
                             print(f"  Warning: failed to read municipality checkpoint for {mname}: {e}; will reprocess")
                 print(f"  Municipality: {mname}")
-                ok = select_option_by_value(page, mun_info.get('selectId'), mval)
+                previous_places = extract_select_options(page, KEYWORDS_PLACE)
+                previous_places_signature = select_options_signature(previous_places)
+                ok = select_option_by_label(page, mun_info.get('selectId'), mname)
+                if not ok:
+                    ok = select_option_by_value(page, mun_info.get('selectId'), mval)
+                if not ok:
+                    ok = select_option_by_visible_text(page, mname)
                 if not ok and interactive:
                     input(f"Please select municipality '{mname}' in the browser then press Enter to continue...")
+                    ok = True
                 page.wait_for_timeout(400)
+                if ok and not wait_for_select_value(page, mun_info.get('selectId'), mval, mname):
+                    debug = selected_option_debug(page, mun_info.get('selectId'))
+                    raise RuntimeError(f"Municipality selection did not settle: {mname} ({mval}); live={debug}")
                 municipality_totals = extract_page_totals(page)
                 # extract places
-                place_info = extract_select_options(page, KEYWORDS_PLACE)
+                place_info = wait_for_options_refresh(page, KEYWORDS_PLACE, previous_places_signature)
                 if not place_info:
                     print(f"    No standard place select for {mname}; saving candidates and skipping.")
                     cand = extract_candidate_elements(page, KEYWORDS_PLACE)

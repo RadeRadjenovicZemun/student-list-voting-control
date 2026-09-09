@@ -88,16 +88,11 @@
                 <h3 id="resultsRegionChartTitle">Results per Region</h3>
               </div>
               <div id="resultsRegionChartContent">
-                <div class="results-tabs" role="tablist" aria-label="Results tabs">
-                  <button type="button" class="results-tab-btn active" data-results-tab="results-tab-per-region" role="tab" aria-selected="true">Results per Region</button>
-                  <button type="button" class="results-tab-btn" data-results-tab="results-tab-coverage" role="tab" aria-selected="false">Coverage</button>
-                </div>
-
-                <div id="results-tab-per-region" class="results-tab-panel active" role="tabpanel">
-                  <div id="resultsRegionChartRows" class="region-chart-rows"></div>
-                </div>
-
-                <div id="results-tab-coverage" class="results-tab-panel" role="tabpanel"></div>
+                <label class="results-region-filter" for="resultsRegionSelect">
+                  <span id="resultsRegionSelectLabel">Region</span>
+                  <select id="resultsRegionSelect"></select>
+                </label>
+                <div id="resultsRegionChartRows" class="region-chart-rows"></div>
               </div>
             </div>
 
@@ -256,6 +251,10 @@
                     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                       <input type="checkbox" id="dbClearCorrection" class="db-clear-item">
                       <span id="dbClearCorrectionLabel">Clear Correction</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="dbClearRawMessages" class="db-clear-item">
+                      <span id="dbClearRawMessagesLabel">Delete All Raw Messages</span>
                     </label>
                   </div>
                 </div>
