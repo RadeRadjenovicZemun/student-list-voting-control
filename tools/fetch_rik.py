@@ -628,18 +628,6 @@ def load_default_candidate_votes(page=None, out_dir=None, checkpoints_dir=None):
     return candidates
 
 
-def load_default_sender_statuses():
-    return [
-        {'id': '0', 'name': 'Неактиван', 'codeName': 'Passive', 'alias': 'Н'},
-        {'id': '1', 'name': 'Присутан', 'codeName': 'Active', 'alias': 'А'},
-        {'id': '2', 'name': 'Гласање у току', 'codeName': 'Voting', 'alias': 'Г'},
-        {'id': '3', 'name': 'Прекид на изборном месту', 'codeName': 'Stopped', 'alias': 'П'},
-        {'id': '4', 'name': 'Бројање гласове', 'codeName': 'Counting', 'alias': 'Б'},
-        {'id': '5', 'name': 'Прелиминарни резултати', 'codeName': 'Preliminary', 'alias': 'Р'},
-        {'id': '6', 'name': 'Потписан записник', 'codeName': 'Official', 'alias': 'З'}
-    ]
-
-
 def normalize_result(raw_result, candidate_votes):
     result = dict(raw_result) if isinstance(raw_result, dict) else {}
     result.setdefault('candidateVotes', candidate_votes)
@@ -660,7 +648,6 @@ def post_process_config(raw_config, page=None, out_dir=None, checkpoints_dir=Non
         {'id': str(c['id']), 'votes': 0, 'alias': c.get('alias', 'TBD'), 'percentage': 0.0}
         for c in candidate_lists_root
     ]
-    sender_statuses = load_default_sender_statuses()
 
     raw_regions = raw_config.get('regions', []) if isinstance(raw_config, dict) else []
     processed_regions = []
@@ -780,10 +767,8 @@ def post_process_config(raw_config, page=None, out_dir=None, checkpoints_dir=Non
         }) if isinstance(raw_config, dict) and 'result' in raw_config and raw_config['result'].get('candidateVotes') else {'candidateVotes': candidate_lists_root}, candidate_lists_root),
         'regions': processed_regions,
         'totalVoted': raw_config.get('totalVoted', 0) if isinstance(raw_config, dict) else 0,
-        'senderStatuses': raw_config.get('senderStatuses', sender_statuses) if isinstance(raw_config, dict) else sender_statuses,
-        'defaultLanguage': raw_config.get('defaultLanguage', 'sr') if isinstance(raw_config, dict) else 'sr',
-        'multiLanguage': raw_config.get('multiLanguage', {}) if isinstance(raw_config, dict) else {},
-        'templates': raw_config.get('templates', []) if isinstance(raw_config, dict) else [],
+        # defaultLanguage/multiLanguage/templates/senderStatuses live in data/multilang.json and
+        # data/templates.json; they are not part of the RIK scraping scope and must not land in config.json.
         'voted': raw_config.get('voted', 0) if isinstance(raw_config, dict) else 0,
         'votedFromHome': raw_config.get('votedFromHome', 0) if isinstance(raw_config, dict) else 0
     }

@@ -23,6 +23,14 @@
       let coverageConfigVersionToken = null;
       let coverageTimelineSnapshots = [];
       let resultsChartSplitRatio = 1 / 3;
+      let irregularitiesRecords = [];
+      let irregularitiesFilter = { type: 'all', value: 'all' };
+      let irregularitiesTreeBuiltForConfig = null;
+      let selectedIrregularityId = null;
+      let zapRecords = [];
+      let zapFilter = { type: 'all', value: 'all' };
+      let zapTreeBuiltForConfig = null;
+      let selectedZapRecordId = null;
       let selectedResultsRegionId = 'ALL';
       const RESULT_CANDIDATE_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#475569'];
       const COVERAGE_STATUS_COLORS = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#0f766e', '#ea580c', '#475569'];
@@ -47,8 +55,35 @@
         return (multi[lang] && multi[lang].ui) || (multi.sr && multi.sr.ui) || (multi.en && multi.en.ui) || {};
       }
 
+      function setIrregularitiesActionsVisibility(panel) {
+        const actions = document.getElementById('irregularitiesActions');
+        if (actions) actions.hidden = panel !== 'irregularities' && panel !== 'zap-records';
+        if (panel === 'zap-records') updateZapPreviewButton();
+        else if (panel === 'irregularities') updateIrregularityPreviewButton();
+      }
+
+      function setZapLabels() {
+        const locale = getLocaleDictionary();
+        const title = document.getElementById('zapTreeTitle');
+        if (title) title.textContent = locale.irregularitiesTreeTitle || 'Voting places';
+        const headers = { zapDateHeader: locale.irregularitiesDate || 'Date', zapTimeHeader: locale.irregularitiesTime || 'Time', zapPlaceHeader: locale.irregularitiesPlace || 'Voting place' };
+        Object.entries(headers).forEach(([id, text]) => { const element = document.getElementById(id); if (element) element.textContent = text; });
+      }
+
       function refreshLocalizedStaticLabels() {
         const locale = getLocaleDictionary();
+        const irregularityPreviewBtn = document.getElementById('irregularityPreviewBtn');
+        if (irregularityPreviewBtn) irregularityPreviewBtn.textContent = locale.irregularitiesPreview || 'Preview';
+        const previewTitle = document.getElementById('irregularityPreviewTitle');
+        if (previewTitle) previewTitle.textContent = locale.irregularitiesPreviewTitle || 'Voting irregularity incident report';
+        const previewFile = document.getElementById('irregularityPreviewFileBtn');
+        if (previewFile) previewFile.textContent = locale.irregularitiesFile || 'File';
+        const previewSave = document.getElementById('irregularityPreviewSaveBtn');
+        if (previewSave) previewSave.textContent = locale.irregularitiesSave || 'Save';
+        const previewSaveAs = document.getElementById('irregularityPreviewSaveAsBtn');
+        if (previewSaveAs) previewSaveAs.textContent = locale.irregularitiesSaveAs || 'Save as';
+        const irregularitiesTreeTitle = document.getElementById('irregularitiesTreeTitle');
+        if (irregularitiesTreeTitle) irregularitiesTreeTitle.textContent = locale.irregularitiesTreeTitle || 'Voting places';
         const timeLabel = document.querySelector('.time-label');
         if (timeLabel && locale.bannerTime) timeLabel.textContent = locale.bannerTime;
 
@@ -178,14 +213,30 @@
         const debugMainTabs = {
           inProgress: locale.debugInProgressTab || 'In Progress',
           message: locale.debugMessageTab || 'Message',
+          irregularities: locale.debugIrregularitiesTab || 'Irregularities',
           database: locale.debugDatabaseTab || 'Data Base'
         };
         const debugInProgressTab = document.querySelector('[data-debug-main-tab="debug-main-tab-in-progress"]');
         const debugMessageTab = document.querySelector('[data-debug-main-tab="debug-main-tab-message"]');
         const debugDatabaseTabBtn = document.querySelector('[data-debug-main-tab="debug-main-tab-database"]');
+        const debugIrregularitiesTab = document.querySelector('[data-debug-main-tab="debug-main-tab-irregularities"]');
         if (debugInProgressTab) debugInProgressTab.textContent = debugMainTabs.inProgress;
         if (debugMessageTab) debugMessageTab.textContent = debugMainTabs.message;
         if (debugDatabaseTabBtn) debugDatabaseTabBtn.textContent = debugMainTabs.database;
+        if (debugIrregularitiesTab) debugIrregularitiesTab.textContent = debugMainTabs.irregularities;
+
+        const irregularityHeaders = {
+          irregularitiesDateHeader: locale.irregularitiesDate || 'Date',
+          irregularitiesTimeHeader: locale.irregularitiesTime || 'Time',
+          irregularitiesSenderHeader: locale.irregularitiesSender || 'Sender',
+          irregularitiesPlaceHeader: locale.irregularitiesPlace || 'Voting place',
+          irregularitiesExplanationHeader: locale.irregularitiesExplanation || 'Explanation',
+          irregularitiesPhotoHeader: locale.irregularitiesPhoto || 'Photo'
+        };
+        Object.entries(irregularityHeaders).forEach(([id, text]) => {
+          const element = document.getElementById(id);
+          if (element) element.textContent = text;
+        });
 
         const debugMessageFilterLabel = document.getElementById('debugMessageFilterLabel');
         if (debugMessageFilterLabel) debugMessageFilterLabel.textContent = locale.signalColumnFilterLabel || 'Filter';
@@ -247,6 +298,10 @@
         if (dbClearResultsLabel) dbClearResultsLabel.textContent = locale.dbClearResults || 'Clear Results';
         const dbClearCorrectionLabel = document.getElementById('dbClearCorrectionLabel');
         if (dbClearCorrectionLabel) dbClearCorrectionLabel.textContent = locale.dbClearCorrection || 'Clear Correction';
+        const dbClearIrregularitiesLabel = document.getElementById('dbClearIrregularitiesLabel');
+        if (dbClearIrregularitiesLabel) dbClearIrregularitiesLabel.textContent = locale.dbClearIrregularities || 'Delete All Irregularities';
+        const dbClearZapRecordsLabel = document.getElementById('dbClearZapRecordsLabel');
+        if (dbClearZapRecordsLabel) dbClearZapRecordsLabel.textContent = locale.dbClearZapRecords || 'Delete All Polling Station Records';
 
         const settingsStopwatchTab = document.querySelector('[data-settings-tab="settings-tab-stopwatch"]');
         if (settingsStopwatchTab) {
@@ -453,6 +508,7 @@
         return [
           { id: 'izlaznost', label: 'Izlaznost' },
           { id: 'rezultati', label: 'Izborni rezultati' },
+          { id: 'irregularities', label: 'Irregularities' },
           { id: 'debug', label: 'Alati' },
           { id: 'language', label: 'Jezik' }
         ];
@@ -495,6 +551,9 @@
           buildRegionsTree(cachedConfig);
           buildResultsCards(cachedConfig);
           buildResultsTree(cachedConfig);
+          buildIrregularitiesTree(cachedConfig);
+          buildZapTree(cachedConfig);
+          setZapLabels();
           if (cachedConfig) {
             const totals = buildConfigTotals(cachedConfig);
             const totalRegistered = Object.values(totals.placeTotals || {}).reduce((sum, item) => sum + Number(item || 0), 0);
@@ -527,6 +586,7 @@
             document.querySelectorAll('.menu-item').forEach((b) => b.classList.toggle('active', b === button));
             const panel = button.dataset.panel;
             document.getElementById('pageTitle').textContent = button.textContent;
+            setIrregularitiesActionsVisibility(panel);
             document.querySelectorAll('.panel').forEach((p) => {
               const toShow = p.id === 'panel-' + panel;
               p.style.display = toShow ? '' : 'none';
@@ -1454,6 +1514,16 @@
         return { votes, total };
       }
 
+      function getBallotTotalsForResult(result, votedTotal = 0) {
+        const nonValidValues = Array.isArray(result && result.nonValidVotes) ? result.nonValidVotes : [];
+        const inferredNonValid = nonValidValues.reduce((sum, item) => sum + Number(item && item.votes || 0), 0);
+        const nonValid = Number((result && result.nonRegularBallots) != null ? result.nonRegularBallots : inferredNonValid);
+        const remaining = Number(result && result.remainingBallots || 0);
+        const totalVoted = Number(votedTotal || 0);
+        const valid = Math.max(totalVoted - nonValid, 0);
+        return { valid, nonValid, remaining };
+      }
+
       function getCoverageTimelineLocale() {
         const isSerbian = String(activeLanguage || '').toLowerCase().startsWith('sr');
         if (isSerbian) {
@@ -1775,6 +1845,10 @@
         buildRegionCards(config);
         buildResultsCards(config);
         buildResultsTree(config);
+        buildIrregularitiesTree(config);
+        buildZapTree(config);
+        setZapLabels();
+        setupIrregularitiesSplitter();
         refreshLocalizedStaticLabels();
         updateParliamentaryViewVisibility();
         attachRegionChartToggle();
@@ -2061,6 +2135,7 @@
         const candidates = getResultCandidates(config);
         const candidateIds = candidates.map((candidate) => String(candidate.id));
 
+        globalThis.cleanupResultsTableViewport?.();
         container.innerHTML = '';
 
         const table = el('table');
@@ -2075,7 +2150,7 @@
         const ballotGroupHeader = `<th id="resultsHeaderBallots" colspan="3" class="group-header">${locale.tableBallots || 'Ballots'}</th>`;
         const ballotSubHeaders = `<th id="resultsHeaderValid">${locale.tableBallotsValid || 'Valid'}</th><th id="resultsHeaderNonValid">${locale.tableBallotsNonValid || 'Non valid'}</th><th id="resultsHeaderRemaining">${locale.tableBallotsRemaining || 'Remaining'}</th>`;
         thead.innerHTML = `
-          <tr>
+          <tr class="results-header-group-row">
             <th id="resultsHeaderName" rowspan="2" style="width:30%">${locale.tableName || 'Name'}</th>
             <th id="resultsHeaderRegistered" rowspan="2" style="width:10%">${locale.tableRegistered || 'Registered'}</th>
             <th id="resultsHeaderVoted" colspan="3" class="group-header" style="width:22%">${locale.tableVoted || 'Voted'}</th>
@@ -2083,7 +2158,7 @@
             ${candidateHeaderCells}
             <th id="resultsHeaderControllerActivity" rowspan="2" style="width:10%">${locale.tableControllerActivity || 'Controller Activity'}</th>
           </tr>
-          <tr>
+          <tr class="results-header-label-row">
             <th id="resultsHeaderVotedInPlace">${locale.tableVotedInPlace || 'Voted in Place'}</th>
             <th id="resultsHeaderVotedFromHome">${locale.tableVotedFromHome || 'Voted from Home'}</th>
             <th id="resultsHeaderVotedTotal">${locale.tableVotedTotal || 'Total'}</th>
@@ -2261,8 +2336,100 @@
         const headerDiv = el('div');
         headerDiv.className = 'table-header';
         headerDiv.innerHTML = `<button id="resultsPregledBtn" class="collapse-btn" data-expanded="1">▼</button> <strong id="resultsSummaryTitle">${locale.regionSummaryTitle || 'Data'}</strong>`;
+        const tableScroll = document.createElement('div');
+        tableScroll.className = 'results-table-scroll';
+        tableScroll.appendChild(table);
         container.appendChild(headerDiv);
-        container.appendChild(table);
+        const stickyHeaderViewport = document.createElement('div');
+        stickyHeaderViewport.className = 'results-sticky-header-viewport';
+        container.appendChild(tableScroll);
+
+        const stickyHeaderTable = document.createElement('table');
+        stickyHeaderTable.className = 'regions-table results-sticky-header-table';
+        stickyHeaderTable.innerHTML = thead.outerHTML;
+        stickyHeaderTable.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+        thead.style.visibility = 'hidden';
+        stickyHeaderViewport.appendChild(stickyHeaderTable);
+        container.insertBefore(stickyHeaderViewport, tableScroll);
+        const syncStickyHeaderMetrics = () => {
+          stickyHeaderTable.style.width = `${table.getBoundingClientRect().width}px`;
+          stickyHeaderTable.style.transform = `translateX(${-tableScroll.scrollLeft}px)`;
+          stickyHeaderTable.querySelectorAll('th').forEach((headerCell, index) => {
+            const sourceCell = thead.querySelectorAll('th')[index];
+            if (sourceCell) headerCell.style.width = `${sourceCell.getBoundingClientRect().width}px`;
+          });
+        };
+        syncStickyHeaderMetrics();
+
+        const bottomScrollbar = document.createElement('div');
+        bottomScrollbar.id = 'resultsBottomScrollbar';
+        bottomScrollbar.className = 'results-bottom-scrollbar';
+        bottomScrollbar.innerHTML = '<div class="results-bottom-scrollbar-content"></div>';
+        document.body.appendChild(bottomScrollbar);
+        const bottomScrollbarContent = bottomScrollbar.firstElementChild;
+        const mainScrollContainer = document.querySelector('.main');
+        let syncingBottomScrollbar = false;
+        const syncBottomScrollbarMetrics = () => {
+          const rect = container.getBoundingClientRect();
+          bottomScrollbar.style.left = `${Math.max(0, rect.left)}px`;
+          bottomScrollbar.style.width = `${Math.max(0, window.innerWidth - Math.max(0, rect.left))}px`;
+          const contentWidth = Math.max(tableScroll.scrollWidth, table.scrollWidth);
+          bottomScrollbarContent.style.width = `${contentWidth}px`;
+          bottomScrollbar.style.display = contentWidth > tableScroll.clientWidth ? 'block' : 'none';
+          bottomScrollbar.scrollLeft = tableScroll.scrollLeft;
+        };
+        bottomScrollbar.addEventListener('scroll', () => {
+          if (syncingBottomScrollbar) return;
+          syncingBottomScrollbar = true;
+          tableScroll.scrollLeft = bottomScrollbar.scrollLeft;
+          syncingBottomScrollbar = false;
+        });
+        tableScroll.addEventListener('scroll', () => {
+          if (syncingBottomScrollbar) return;
+          syncingBottomScrollbar = true;
+          bottomScrollbar.scrollLeft = tableScroll.scrollLeft;
+          syncingBottomScrollbar = false;
+        });
+        const updateResultsTableStickyOffset = () => {
+          const banner = document.querySelector('.page-banner');
+          const bannerBottom = banner ? Math.max(0, banner.getBoundingClientRect().bottom) : 0;
+          table.style.setProperty('--results-table-sticky-top', `${bannerBottom}px`);
+          stickyHeaderViewport.style.setProperty('--results-table-sticky-top', `${bannerBottom}px`);
+          const tableRect = tableScroll.getBoundingClientRect();
+          const headerHeight = stickyHeaderViewport.offsetHeight;
+          const shouldPin = tableRect.top <= bannerBottom && tableRect.bottom > bannerBottom + headerHeight;
+          stickyHeaderViewport.classList.toggle('is-pinned', shouldPin);
+          if (shouldPin) {
+            stickyHeaderViewport.style.left = `${tableRect.left}px`;
+            stickyHeaderViewport.style.width = `${tableScroll.clientWidth}px`;
+          } else {
+            stickyHeaderViewport.style.left = '';
+            stickyHeaderViewport.style.width = '';
+          }
+          syncStickyHeaderMetrics();
+          syncBottomScrollbarMetrics();
+        };
+        const resultsTableResizeObserver = typeof ResizeObserver === 'function'
+          ? new ResizeObserver(syncBottomScrollbarMetrics)
+          : null;
+        resultsTableResizeObserver?.observe(container);
+        resultsTableResizeObserver?.observe(table);
+        resultsTableResizeObserver?.observe(stickyHeaderTable);
+        resultsTableResizeObserver?.observe(stickyHeaderViewport);
+        globalThis.cleanupResultsTableViewport = () => {
+          window.removeEventListener('resize', updateResultsTableStickyOffset);
+          window.removeEventListener('scroll', updateResultsTableStickyOffset);
+          mainScrollContainer?.removeEventListener('scroll', updateResultsTableStickyOffset);
+          resultsTableResizeObserver?.disconnect();
+          bottomScrollbar.remove();
+          if (globalThis.cleanupResultsTableViewport) {
+            delete globalThis.cleanupResultsTableViewport;
+          }
+        };
+        window.addEventListener('resize', updateResultsTableStickyOffset);
+        window.addEventListener('scroll', updateResultsTableStickyOffset, { passive: true });
+        mainScrollContainer?.addEventListener('scroll', updateResultsTableStickyOffset, { passive: true });
+        updateResultsTableStickyOffset();
 
         (function attachPregled() {
           const btn = container.querySelector('#resultsPregledBtn');
@@ -3203,6 +3370,374 @@
         }
       }
 
+      async function refreshIrregularitiesTable() {
+        const tbody = document.getElementById('irregularitiesBody');
+        if (!tbody) return;
+        const locale = getLocaleDictionary();
+        try {
+          const response = await fetch('/api/irregularities');
+          const rows = await response.json();
+          irregularitiesRecords = Array.isArray(rows) ? rows : [];
+          if (irregularitiesTreeBuiltForConfig !== cachedConfig) buildIrregularitiesTree(cachedConfig);
+          else updateIrregularitiesTreeCounts();
+          const filteredRows = irregularitiesRecords.filter(irregularityMatchesFilter);
+          renderIrregularityRows(filteredRows);
+        } catch (error) {
+          tbody.innerHTML = `<tr><td colspan="4" class="irregularity-empty">${escapeHtml(locale.irregularitiesEmpty || 'No irregularities reported.')}</td></tr>`;
+        }
+      }
+
+      function irregularityMatchesFilter(row) {
+        if (!row || irregularitiesFilter.type === 'all') return true;
+        return String(row[irregularitiesFilter.type] || '') === String(irregularitiesFilter.value);
+      }
+
+      function irregularityCount(filter) {
+        return irregularitiesRecords.filter((row) => {
+          if (!filter || filter.type === 'all') return true;
+          return String(row && row[filter.type] || '') === String(filter.value);
+        }).length;
+      }
+
+      function makeIrregularitiesTreeNode(label, filter, children, initiallyExpanded = false) {
+        const item = document.createElement('li');
+        item.className = 'irregularities-tree-item';
+        const row = document.createElement('div');
+        row.className = 'irregularities-tree-node-row';
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'irregularities-tree-toggle';
+        toggle.textContent = children && children.length ? (initiallyExpanded ? '▼' : '▶') : '';
+        const labelButton = document.createElement('button');
+        labelButton.type = 'button';
+        labelButton.className = 'irregularities-tree-row';
+        labelButton.dataset.filterType = filter.type;
+        labelButton.dataset.filterValue = filter.value;
+        labelButton.style.padding = '0';
+        labelButton.style.flex = '1';
+        const labelText = document.createElement('span');
+        labelText.className = 'irregularities-tree-label';
+        labelText.textContent = label;
+        const count = document.createElement('span');
+        count.className = 'irregularities-tree-count';
+        count.textContent = String(irregularityCount(filter));
+        labelButton.append(labelText, count);
+        row.append(toggle, labelButton);
+        item.appendChild(row);
+
+        if (children && children.length) {
+          const childList = document.createElement('ul');
+          childList.className = 'irregularities-tree-children';
+          childList.hidden = !initiallyExpanded;
+          children.forEach((child) => childList.appendChild(child));
+          item.appendChild(childList);
+          toggle.addEventListener('click', () => {
+            const expanded = childList.hidden;
+            childList.hidden = !expanded;
+            toggle.textContent = expanded ? '▼' : '▶';
+          });
+        }
+        const select = () => {
+          irregularitiesFilter = filter;
+          refreshIrregularitiesTreeSelection();
+          renderFilteredIrregularitiesTable();
+        };
+        labelButton.addEventListener('click', select);
+        return item;
+      }
+
+      function refreshIrregularitiesTreeSelection() {
+        document.querySelectorAll('#irregularitiesTree .irregularities-tree-row[data-filter-type]').forEach((row) => {
+          const active = row.dataset.filterType === irregularitiesFilter.type && row.dataset.filterValue === String(irregularitiesFilter.value);
+          row.classList.toggle('active', active);
+        });
+      }
+
+      function updateIrregularitiesTreeCounts() {
+        document.querySelectorAll('#irregularitiesTree .irregularities-tree-row[data-filter-type]').forEach((row) => {
+          const count = row.querySelector('.irregularities-tree-count');
+          if (count) count.textContent = String(irregularityCount({ type: row.dataset.filterType, value: row.dataset.filterValue }));
+        });
+      }
+
+      function renderFilteredIrregularitiesTable() {
+        renderIrregularityRows(irregularitiesRecords.filter(irregularityMatchesFilter));
+      }
+
+      function renderIrregularityRows(rows) {
+        const tbody = document.getElementById('irregularitiesBody');
+        if (!tbody) return;
+        const locale = getLocaleDictionary();
+        if (!rows.some((row) => String(row.id) === String(selectedIrregularityId))) selectedIrregularityId = null;
+        if (!rows.length) {
+          tbody.innerHTML = `<tr><td colspan="5" class="irregularity-empty">${escapeHtml(locale.irregularitiesEmpty || 'No irregularities reported.')}</td></tr>`;
+          updateIrregularityPreviewButton();
+          return;
+        }
+        tbody.innerHTML = rows.map((row) => {
+          const date = row.receivedAt ? new Date(row.receivedAt) : null;
+          const checked = String(row.id) === String(selectedIrregularityId) ? ' checked' : '';
+          return `<tr data-irregularity-id="${escapeHtml(row.id)}"><td class="irregularity-select-cell"><input class="irregularity-select" type="checkbox" aria-label="Select irregularity" data-irregularity-id="${escapeHtml(row.id)}"${checked}></td><td>${escapeHtml(date ? date.toLocaleDateString() : '--')}</td><td>${escapeHtml(date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--')}</td><td>${escapeHtml(row.place || '--')}</td><td>${escapeHtml(row.explanation || '')}</td></tr>`;
+        }).join('');
+        updateIrregularityPreviewButton();
+      }
+
+      function updateIrregularityPreviewButton() {
+        const button = document.getElementById('irregularityPreviewBtn');
+        if (button) button.disabled = !selectedIrregularityId;
+      }
+
+      function setupIrregularitySelection() {
+        const tbody = document.getElementById('irregularitiesBody');
+        const preview = document.getElementById('irregularityPreviewBtn');
+        if (!tbody || tbody.dataset.ready) return;
+        tbody.dataset.ready = '1';
+        tbody.addEventListener('change', (event) => {
+          const checkbox = event.target.closest('.irregularity-select');
+          if (!checkbox) return;
+          selectedIrregularityId = checkbox.checked ? checkbox.dataset.irregularityId : null;
+          renderFilteredIrregularitiesTable();
+        });
+        preview?.addEventListener('click', () => {
+          if (document.querySelector('.menu-item.active')?.dataset.panel === 'zap-records') openZapPreview();
+          else openIrregularityPreview();
+        });
+        updateIrregularityPreviewButton();
+      }
+
+      function openIrregularityPreview() {
+        const record = irregularitiesRecords.find((row) => String(row.id) === String(selectedIrregularityId));
+        if (!record) return;
+        const locale = getLocaleDictionary();
+        const date = record.receivedAt ? new Date(record.receivedAt) : null;
+        const dateText = date ? `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}` : '--';
+        const attachment = (record.attachments || []).find((item) => item && item.storedFilename);
+        const imageUrl = attachment ? `/api/irregularities/${encodeURIComponent(record.id)}/attachments/${(record.attachments || []).indexOf(attachment)}` : '';
+        const defaultName = `${String(record.place || 'voting-place').replace(/[^\p{L}\p{N}_-]+/gu, '_')}_${date ? date.toISOString().replace(/[:.]/g, '-') : 'report'}.pdf`;
+        const modal = document.getElementById('irregularityPreviewModal');
+        const documentEl = document.getElementById('irregularityPreviewDocument');
+        if (modal && documentEl) {
+          documentEl.dataset.defaultFilename = defaultName;
+          documentEl.innerHTML = `<h2>${escapeHtml(locale.irregularitiesPreviewTitle || 'Voting irregularity incident report')}</h2><section class="location"><div><strong>${escapeHtml(locale.irregularitiesRegion || 'Region')}</strong>${escapeHtml(record.region || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesMunicipality || 'Municipality')}</strong>${escapeHtml(record.municipality || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesPlace || 'Voting place')}</strong>${escapeHtml(record.place || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesDateTime || 'Date and time')}</strong>${escapeHtml(dateText)}</div></section><div class="statement">${escapeHtml(locale.irregularitiesIncidentStatement || 'This is a voting irregularity incident report.')}</div><div class="description">${escapeHtml(record.explanation || '')}</div>${imageUrl ? `<img class="photo" src="${imageUrl}" alt="${escapeHtml(locale.irregularitiesPhoto || 'Photo')}">` : ''}`;
+          modal.hidden = false;
+          document.body.classList.add('irregularity-modal-open');
+          documentEl.scrollTop = 0;
+          modal.querySelector('.irregularity-preview-window')?.focus();
+          document.getElementById('irregularityPreviewFileMenu').hidden = true;
+          return;
+        }
+        const popup = window.open('', 'irregularity-preview', 'popup,width=900,height=1000');
+        if (!popup) return;
+        popup.document.open();
+        popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(defaultName)}</title><style>@page{size:A4;margin:18mm}*{box-sizing:border-box}body{margin:0;color:#172033;font-family:Arial,sans-serif}.toolbar{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid #cbd5e1;background:#f8fafc;position:sticky;top:0}.toolbar h1{font-size:16px;flex:1;margin:0}.file{position:relative}.file>button,.file-menu button{font:inherit;padding:7px 12px;border:1px solid #94a3b8;background:white;border-radius:4px;cursor:pointer}.file-menu{position:absolute;right:0;top:100%;display:grid;min-width:120px;background:white;border:1px solid #cbd5e1;box-shadow:0 4px 12px #0002}.file-menu[hidden]{display:none}.file-menu button{border:0;border-radius:0;text-align:left}.close{border:0;background:transparent;font-size:20px;cursor:pointer}.report{max-width:174mm;margin:22mm auto 0}.report h2{text-align:center;font-size:20px;margin:0 0 18mm}.location{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;border-bottom:1px solid #cbd5e1;padding-bottom:10mm}.location strong{display:block;font-size:11px;text-transform:uppercase;color:#64748b;margin-bottom:3px}.statement{font-size:16px;font-weight:700;margin:14mm 0 8mm}.description{font-size:14px;line-height:1.55;white-space:pre-wrap}.photo{display:block;max-width:100%;max-height:105mm;margin:14mm auto 0;object-fit:contain}@media print{.toolbar{display:none}.report{margin:0 auto}}</style></head><body><header class="toolbar"><h1>${escapeHtml(locale.irregularitiesPreviewTitle || 'Voting irregularity incident report')}</h1><div class="file"><button id="fileButton">${escapeHtml(locale.irregularitiesFile || 'File')}</button><div id="fileMenu" class="file-menu" hidden><button id="saveButton">${escapeHtml(locale.irregularitiesSave || 'Save')}</button><button id="saveAsButton">${escapeHtml(locale.irregularitiesSaveAs || 'Save as')}</button></div></div><button class="close" id="closeButton" aria-label="Close">X</button></header><main class="report"><h2>${escapeHtml(locale.irregularitiesPreviewTitle || 'Voting irregularity incident report')}</h2><section class="location"><div><strong>${escapeHtml(locale.irregularitiesRegion || 'Region')}</strong>${escapeHtml(record.region || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesMunicipality || 'Municipality')}</strong>${escapeHtml(record.municipality || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesPlace || 'Voting place')}</strong>${escapeHtml(record.place || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesDateTime || 'Date and time')}</strong>${escapeHtml(dateText)}</div></section><div class="statement">${escapeHtml(locale.irregularitiesIncidentStatement || 'This is a voting irregularity incident report.')}</div><div class="description">${escapeHtml(record.explanation || '')}</div>${imageUrl ? `<img class="photo" src="${imageUrl}" alt="${escapeHtml(locale.irregularitiesPhoto || 'Photo')}">` : ''}</main><script>const fileButton=document.getElementById('fileButton'),fileMenu=document.getElementById('fileMenu');fileButton.onclick=()=>fileMenu.hidden=!fileMenu.hidden;document.getElementById('closeButton').onclick=()=>window.close();document.getElementById('saveButton').onclick=()=>window.print();document.getElementById('saveAsButton').onclick=()=>window.print();document.addEventListener('click',e=>{if(!e.target.closest('.file'))fileMenu.hidden=true});<\/script></body></html>`);
+        popup.document.close();
+        popup.focus();
+      }
+
+      function setupIrregularityPreviewModal() {
+        const modal = document.getElementById('irregularityPreviewModal');
+        const close = () => {
+          if (!modal) return;
+          modal.hidden = true;
+          document.body.classList.remove('irregularity-modal-open');
+          document.getElementById('irregularityPreviewBtn')?.focus();
+        };
+        document.getElementById('irregularityPreviewCloseBtn')?.addEventListener('click', close);
+        modal?.querySelector('[data-preview-close]')?.addEventListener('click', close);
+        document.getElementById('irregularityPreviewFileBtn')?.addEventListener('click', () => {
+          const menu = document.getElementById('irregularityPreviewFileMenu');
+          if (menu) menu.hidden = !menu.hidden;
+        });
+        const printReport = () => {
+          const menu = document.getElementById('irregularityPreviewFileMenu');
+          if (menu) menu.hidden = true;
+          const documentEl = document.getElementById('irregularityPreviewDocument');
+          const previousTitle = document.title;
+          if (documentEl && documentEl.dataset.defaultFilename) document.title = documentEl.dataset.defaultFilename;
+          document.body.classList.add('printing-irregularity');
+          window.print();
+          window.setTimeout(() => {
+            document.body.classList.remove('printing-irregularity');
+            document.title = previousTitle;
+          }, 500);
+        };
+        document.getElementById('irregularityPreviewSaveBtn')?.addEventListener('click', printReport);
+        document.getElementById('irregularityPreviewSaveAsBtn')?.addEventListener('click', printReport);
+        document.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape' && modal && !modal.hidden) close();
+        });
+      }
+
+      function buildIrregularitiesTree(config) {
+        const tree = document.getElementById('irregularitiesTree');
+        if (!tree || !config) return;
+        tree.innerHTML = '';
+        const root = document.createElement('ul');
+        root.className = 'irregularities-tree-list';
+        const locale = getLocaleDictionary();
+        const regionNodes = getRegions(config).map((region) => {
+          const municipalityNodes = (region.municipalities || []).map((municipality) => {
+            const placeNodes = (municipality.places || []).map((place) => makeIrregularitiesTreeNode(
+              place.name || `Place ${place.id}`,
+              { type: 'place', value: place.name || place.id },
+              []
+            ));
+            return makeIrregularitiesTreeNode(
+              municipality.name || `Municipality ${municipality.id}`,
+              { type: 'municipality', value: municipality.name || municipality.id },
+              placeNodes
+            );
+          });
+          return makeIrregularitiesTreeNode(
+            region.name || `Region ${region.id}`,
+            { type: 'region', value: region.name || region.id },
+            municipalityNodes
+          );
+        });
+        root.appendChild(makeIrregularitiesTreeNode(
+          locale.irregularitiesAll || 'All voting places',
+          { type: 'all', value: 'all' },
+          regionNodes,
+          true
+        ));
+        tree.appendChild(root);
+        refreshIrregularitiesTreeSelection();
+        irregularitiesTreeBuiltForConfig = config;
+      }
+
+      function setupIrregularitiesSplitter() {
+        const workspace = document.querySelector('.irregularities-workspace');
+        const splitter = document.getElementById('irregularitiesSplitter');
+        if (!workspace || !splitter || splitter.dataset.ready) return;
+        splitter.dataset.ready = '1';
+        const setWidth = (clientX) => {
+          const rect = workspace.getBoundingClientRect();
+          const width = Math.max(180, Math.min(rect.width - 300, clientX - rect.left));
+          workspace.style.gridTemplateColumns = `${width}px 8px minmax(0, 1fr)`;
+        };
+        splitter.addEventListener('pointerdown', (event) => {
+          splitter.setPointerCapture(event.pointerId);
+          const move = (moveEvent) => setWidth(moveEvent.clientX);
+          const stop = () => {
+            splitter.removeEventListener('pointermove', move);
+            splitter.removeEventListener('pointerup', stop);
+            splitter.removeEventListener('pointercancel', stop);
+          };
+          splitter.addEventListener('pointermove', move);
+          splitter.addEventListener('pointerup', stop);
+          splitter.addEventListener('pointercancel', stop);
+        });
+        splitter.addEventListener('keydown', (event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          const rect = workspace.getBoundingClientRect();
+          const current = parseFloat(getComputedStyle(workspace).gridTemplateColumns.split(' ')[0]);
+          setWidth(rect.left + current + (event.key === 'ArrowRight' ? 20 : -20));
+        });
+      }
+
+      function setupZapSplitter() {
+        const workspace = document.querySelector('#panel-zap-records .irregularities-workspace');
+        const splitter = document.getElementById('zapSplitter');
+        if (!workspace || !splitter || splitter.dataset.ready) return;
+        splitter.dataset.ready = '1';
+        const setWidth = (clientX) => {
+          const rect = workspace.getBoundingClientRect();
+          const width = Math.max(180, Math.min(rect.width - 300, clientX - rect.left));
+          workspace.style.gridTemplateColumns = `${width}px 8px minmax(0, 1fr)`;
+        };
+        splitter.addEventListener('pointerdown', (event) => {
+          splitter.setPointerCapture(event.pointerId);
+          const move = (moveEvent) => setWidth(moveEvent.clientX);
+          const stop = () => { splitter.removeEventListener('pointermove', move); splitter.removeEventListener('pointerup', stop); splitter.removeEventListener('pointercancel', stop); };
+          splitter.addEventListener('pointermove', move); splitter.addEventListener('pointerup', stop); splitter.addEventListener('pointercancel', stop);
+        });
+      }
+
+      function zapMatchesFilter(row) {
+        if (!row || zapFilter.type === 'all') return true;
+        return String(row[zapFilter.type] || '') === String(zapFilter.value);
+      }
+
+      function zapCount(filter) {
+        return zapRecords.filter((row) => !filter || filter.type === 'all' || String(row && row[filter.type] || '') === String(filter.value)).length;
+      }
+
+      function buildZapTree(config) {
+        const tree = document.getElementById('zapTree');
+        if (!tree || !config) return;
+        tree.innerHTML = '';
+        const root = document.createElement('ul'); root.className = 'irregularities-tree-list';
+        const makeNode = (label, filter, children, expanded = false) => {
+          const item = document.createElement('li'); item.className = 'irregularities-tree-item';
+          const row = document.createElement('div'); row.className = 'irregularities-tree-node-row';
+          const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'irregularities-tree-toggle'; toggle.textContent = children.length ? (expanded ? '▼' : '▶') : '';
+          const select = document.createElement('button'); select.type = 'button'; select.className = 'irregularities-tree-row'; select.style.padding = '0'; select.style.flex = '1'; select.dataset.filterType = filter.type; select.dataset.filterValue = filter.value;
+          const name = document.createElement('span'); name.className = 'irregularities-tree-label'; name.textContent = label;
+          const count = document.createElement('span'); count.className = 'irregularities-tree-count'; count.textContent = String(zapCount(filter)); select.append(name, count); row.append(toggle, select); item.append(row);
+          if (children.length) { const list = document.createElement('ul'); list.className = 'irregularities-tree-children'; list.hidden = !expanded; children.forEach((child) => list.appendChild(child)); item.append(list); toggle.addEventListener('click', () => { list.hidden = !list.hidden; toggle.textContent = list.hidden ? '▶' : '▼'; }); }
+          select.addEventListener('click', () => { zapFilter = filter; document.querySelectorAll('#zapTree .irregularities-tree-row').forEach((el) => el.classList.toggle('active', el === select)); renderZapRecords(); });
+          return item;
+        };
+        const regions = getRegions(config).map((region) => makeNode(region.name || `Region ${region.id}`, { type: 'region', value: region.name || region.id }, (region.municipalities || []).map((mun) => makeNode(mun.name || `Municipality ${mun.id}`, { type: 'municipality', value: mun.name || mun.id }, (mun.places || []).map((place) => makeNode(place.name || `Place ${place.id}`, { type: 'place', value: place.name || place.id }, []))))));
+        const locale = getLocaleDictionary(); root.appendChild(makeNode(locale.irregularitiesAll || 'All voting places', { type: 'all', value: 'all' }, regions, true)); tree.appendChild(root); zapTreeBuiltForConfig = config;
+      }
+
+      function renderZapRecords() {
+        const tbody = document.getElementById('zapRecordsBody'); if (!tbody) return;
+        const rows = zapRecords.filter(zapMatchesFilter);
+        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="4" class="irregularity-empty">${escapeHtml(getLocaleDictionary().zapRecordsEmpty || 'No voting records reported.')}</td></tr>`; updateZapPreviewButton(); return; }
+        if (!rows.some((row) => String(row.id) === String(selectedZapRecordId))) selectedZapRecordId = null;
+        tbody.innerHTML = rows.map((row) => { const date = row.receivedAt ? new Date(row.receivedAt) : null; const checked = String(row.id) === String(selectedZapRecordId) ? ' checked' : ''; return `<tr data-zap-id="${escapeHtml(row.id)}"><td class="irregularity-select-cell"><input class="zap-select" type="checkbox" aria-label="Select voting record" data-zap-id="${escapeHtml(row.id)}"${checked}></td><td>${escapeHtml(date ? date.toLocaleDateString() : '--')}</td><td>${escapeHtml(date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--')}</td><td>${escapeHtml(row.place || '--')}</td></tr>`; }).join('');
+        updateZapPreviewButton();
+      }
+
+      function updateZapPreviewButton() {
+        const button = document.getElementById('irregularityPreviewBtn');
+        if (button && document.querySelector('.menu-item.active')?.dataset.panel === 'zap-records') button.disabled = !selectedZapRecordId;
+      }
+
+      function setupZapSelection() {
+        const tbody = document.getElementById('zapRecordsBody');
+        if (!tbody || tbody.dataset.selectionReady) return;
+        tbody.dataset.selectionReady = '1';
+        tbody.addEventListener('change', (event) => {
+          const checkbox = event.target.closest('.zap-select');
+          if (!checkbox) return;
+          selectedZapRecordId = checkbox.checked ? checkbox.dataset.zapId : null;
+          renderZapRecords();
+        });
+      }
+
+      function openZapPreview() {
+        const record = zapRecords.find((row) => String(row.id) === String(selectedZapRecordId));
+        if (!record) return;
+        const attachment = (record.attachments || []).find((item) => item && item.storedFilename);
+        const imageUrl = attachment ? `/api/zap-records/${encodeURIComponent(record.id)}/attachments/${(record.attachments || []).indexOf(attachment)}` : '';
+        const date = record.receivedAt ? new Date(record.receivedAt) : null;
+        const documentEl = document.getElementById('irregularityPreviewDocument');
+        const modal = document.getElementById('irregularityPreviewModal');
+        if (!documentEl || !modal) return;
+        documentEl.dataset.defaultFilename = `${String(record.place || 'voting-record').replace(/[^\p{L}\p{N}_-]+/gu, '_')}_${date ? date.toISOString().replace(/[:.]/g, '-') : 'record'}.pdf`;
+        const locale = getLocaleDictionary();
+        documentEl.innerHTML = `<h2>${escapeHtml(locale.zapPreviewTitle || 'Polling station voting record')}</h2><section class="location"><div><strong>${escapeHtml(locale.irregularitiesRegion || 'Region')}</strong>${escapeHtml(record.region || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesMunicipality || 'Municipality')}</strong>${escapeHtml(record.municipality || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesPlace || 'Voting place')}</strong>${escapeHtml(record.place || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesDateTime || 'Date and time')}</strong>${escapeHtml(date ? `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}` : '--')}</div></section><div class="statement">${escapeHtml(locale.zapPreviewStatement || 'This is a polling station voting record.')}</div>${imageUrl ? `<img class="photo" src="${imageUrl}" alt="${escapeHtml(locale.zapPhoto || 'Photo')}">` : ''}`;
+        modal.hidden = false;
+        document.body.classList.add('irregularity-modal-open');
+        documentEl.scrollTop = 0;
+        modal.querySelector('.irregularity-preview-window')?.focus();
+      }
+
+      async function refreshZapRecords() {
+        try { const response = await fetch('/api/zap-records'); zapRecords = await response.json(); if (zapTreeBuiltForConfig !== cachedConfig) buildZapTree(cachedConfig); else updateZapTreeCounts(); renderZapRecords(); } catch (error) { zapRecords = []; updateZapTreeCounts(); renderZapRecords(); }
+      }
+
+      function updateZapTreeCounts() {
+        document.querySelectorAll('#zapTree .irregularities-tree-row[data-filter-type]').forEach((row) => {
+          const count = row.querySelector('.irregularities-tree-count');
+          if (count) count.textContent = String(zapCount({ type: row.dataset.filterType, value: row.dataset.filterValue }));
+        });
+      }
+
       function setupDatabaseTab() {
         const btn = document.getElementById('dbClearDataBtn');
         if (!btn) return;
@@ -3230,6 +3765,8 @@
           const locale = getLocaleDictionary();
           const operations = [];
           const clearRawMessages = Boolean(document.getElementById('dbClearRawMessages')?.checked);
+          const clearIrregularities = Boolean(document.getElementById('dbClearIrregularities')?.checked);
+          const clearZapRecords = Boolean(document.getElementById('dbClearZapRecords')?.checked);
           if (document.getElementById('dbClearSender')?.checked) operations.push('sender');
           if (document.getElementById('dbClearStatus')?.checked) operations.push('status');
           if (document.getElementById('dbClearTurnout')?.checked) operations.push('turnout');
@@ -3237,12 +3774,14 @@
           if (document.getElementById('dbClearCorrection')?.checked) operations.push('correction');
 
           const resultEl = document.getElementById('dbClearDataResult');
-          if (!operations.length && !clearRawMessages) {
+          if (!operations.length && !clearRawMessages && !clearIrregularities && !clearZapRecords) {
             if (resultEl) resultEl.textContent = locale.dbClearNoneSelected || 'Select at least one option.';
             return;
           }
 
           if (clearRawMessages && !window.confirm(locale.dbClearRawMessagesConfirm || 'Delete all raw messages? This cannot be undone.')) return;
+          if (clearIrregularities && !window.confirm(locale.dbClearIrregularitiesConfirm || 'Delete all irregularities? This cannot be undone.')) return;
+          if (clearZapRecords && !window.confirm(locale.dbClearZapRecordsConfirm || 'Delete all polling station records? This cannot be undone.')) return;
 
           try {
             if (operations.length) {
@@ -3253,6 +3792,20 @@
               });
               const data = await response.json();
               if (!response.ok) throw new Error(data.error || 'Data clear failed');
+            }
+
+            if (clearIrregularities) {
+              const response = await fetch('/api/irregularities', { method: 'DELETE' });
+              const data = await response.json();
+              if (!response.ok) throw new Error(data.error || 'Irregularities delete failed');
+              await refreshIrregularitiesTable();
+            }
+
+            if (clearZapRecords) {
+              const response = await fetch('/api/zap-records', { method: 'DELETE' });
+              const data = await response.json();
+              if (!response.ok) throw new Error(data.error || 'Polling station records delete failed');
+              await refreshZapRecords();
             }
 
             if (clearRawMessages) {
@@ -4042,6 +4595,7 @@
             e.target.classList.add('active');
             const panel = e.target.dataset.panel;
             document.getElementById('pageTitle').textContent = e.target.textContent;
+            setIrregularitiesActionsVisibility(panel);
             document.querySelectorAll('.panel').forEach(p => p.style.display = 'none');
             document.querySelectorAll('.panel').forEach(p => p.classList.remove('active-panel'));
             const sel = document.getElementById('panel-' + panel);
@@ -4057,10 +4611,17 @@
         setupSignalMessageTabs();
         setupSignalColumnToggles();
         setupSignalFilterControls();
+        setupIrregularitySelection();
+        setupZapSelection();
+        setupIrregularityPreviewModal();
+        setupZapSplitter();
         await refreshSignalPanel();
         await refreshSignalMessageTables();
         await refreshDebugValidMessageTables();
         await refreshDebugRawMessagesTable();
+        await refreshIrregularitiesTable();
+        await refreshZapRecords();
+        setupIrregularitiesSplitter();
         document.getElementById('signalGroupSelect')?.addEventListener('change', async (event) => {
           const groupId = event.target.value;
           if (!groupId) {
@@ -4076,6 +4637,8 @@
           await refreshSignalMessageTables();
         });
         await loadConfigAndBuild();
+        await refreshIrregularitiesTable();
+        await refreshZapRecords();
         applyConfigHeader(cachedConfig);
         syncStopwatchDisplay();
         await refreshSignalMessageTables();
@@ -4085,6 +4648,8 @@
         setInterval(() => globalThis.loadResultsSummary(), 5000);
         setInterval(refreshDebugValidMessageTables, 5000);
         setInterval(refreshDebugRawMessagesTable, 5000);
+        setInterval(refreshIrregularitiesTable, 5000);
+        setInterval(refreshZapRecords, 5000);
         setInterval(refreshSignalPanel, 8000);
         setInterval(updateSignalCountdownDisplay, 1000);
 

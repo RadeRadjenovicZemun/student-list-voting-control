@@ -42,6 +42,9 @@
 
         <header class="main-header">
           <h1 id="pageTitle">Izlaznost</h1>
+          <div class="main-header-actions" id="irregularitiesActions" hidden>
+            <button id="irregularityPreviewBtn" type="button" disabled>Preview</button>
+          </div>
         </header>
 
         <div id="parliamentaryOnlyNotice" class="box small" style="display:none; margin-bottom:16px;"></div>
@@ -99,6 +102,54 @@
             <div class="tree-container" id="resultsTree"></div>
           </div>
           <div class="under-construction-overlay" id="resultsConstructionOverlay">Under Construction</div>
+        </section>
+
+        <section id="panel-irregularities" class="panel" style="display:none">
+          <div class="panel-content irregularities-content">
+            <div class="irregularities-workspace">
+              <aside class="irregularities-tree-pane">
+                <div class="irregularities-pane-title" id="irregularitiesTreeTitle">Voting places</div>
+                <div id="irregularitiesTree" class="irregularities-tree"></div>
+              </aside>
+              <div class="irregularities-splitter" id="irregularitiesSplitter" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize irregularities panes"></div>
+              <section class="irregularities-list-pane">
+                <div class="irregularities-table-wrap">
+                <table class="irregularities-table">
+                  <thead>
+                    <tr>
+                      <th class="irregularity-select-header" aria-label="Select"></th>
+                      <th id="irregularitiesDateHeader">Date</th>
+                      <th id="irregularitiesTimeHeader">Time</th>
+                      <th id="irregularitiesPlaceHeader">Voting place</th>
+                      <th id="irregularitiesExplanationHeader">Explanation</th>
+                    </tr>
+                  </thead>
+                  <tbody id="irregularitiesBody"></tbody>
+                </table>
+              </div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+        <section id="panel-zap-records" class="panel" style="display:none">
+          <div class="panel-content irregularities-content">
+            <div class="irregularities-workspace">
+              <aside class="irregularities-tree-pane">
+                <div class="irregularities-pane-title" id="zapTreeTitle">Бирачка места</div>
+                <div id="zapTree" class="irregularities-tree"></div>
+              </aside>
+              <div class="irregularities-splitter" id="zapSplitter" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize voting records panes"></div>
+              <section class="irregularities-list-pane">
+                <div class="irregularities-table-wrap">
+                  <table class="irregularities-table">
+                    <thead><tr><th class="irregularity-select-header" aria-label="Select"></th><th id="zapDateHeader">Датум</th><th id="zapTimeHeader">Време</th><th id="zapPlaceHeader">Бирачко место</th></tr></thead>
+                    <tbody id="zapRecordsBody"></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          </div>
         </section>
 
         <section id="panel-debug" class="panel" style="display:none">
@@ -255,6 +306,14 @@
                     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                       <input type="checkbox" id="dbClearRawMessages" class="db-clear-item">
                       <span id="dbClearRawMessagesLabel">Delete All Raw Messages</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="dbClearIrregularities" class="db-clear-item">
+                      <span id="dbClearIrregularitiesLabel">Delete All Irregularities</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="dbClearZapRecords" class="db-clear-item">
+                      <span id="dbClearZapRecordsLabel">Delete All Polling Station Records</span>
                     </label>
                   </div>
                 </div>
@@ -452,6 +511,24 @@
         </section>
 
       </main>
+    </div>
+
+    <div id="irregularityPreviewModal" class="irregularity-preview-modal" hidden>
+      <div class="irregularity-preview-backdrop" data-preview-close></div>
+      <section class="irregularity-preview-window" role="dialog" aria-modal="true" aria-labelledby="irregularityPreviewTitle" tabindex="-1">
+        <header class="irregularity-preview-toolbar">
+          <h2 id="irregularityPreviewTitle">Voting irregularity incident report</h2>
+          <div class="irregularity-preview-file-wrap">
+            <button id="irregularityPreviewFileBtn" type="button">File</button>
+            <div id="irregularityPreviewFileMenu" class="irregularity-preview-file-menu" hidden>
+              <button id="irregularityPreviewSaveBtn" type="button">Save</button>
+              <button id="irregularityPreviewSaveAsBtn" type="button">Save as</button>
+            </div>
+          </div>
+          <button id="irregularityPreviewCloseBtn" class="irregularity-preview-close" type="button" aria-label="Close preview">X</button>
+        </header>
+        <article id="irregularityPreviewDocument" class="irregularity-preview-document"></article>
+      </section>
     </div>
 
     <script src="app.js"></script>

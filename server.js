@@ -17,6 +17,10 @@ const I18N_PATH = path.join(DATA_DIR, 'multilang.json');
 const TEMPLATES_PATH = path.join(DATA_DIR, 'templates.json');
 const MESSAGES_PATH = path.join(DATA_DIR, 'messages.json');
 const SIGNAL_RAW_MESSAGES_PATH = path.join(DATA_DIR, 'signal-raw-messages.json');
+const IRREGULARITIES_PATH = path.join(DATA_DIR, 'irregularities.json');
+const IRREGULARITIES_MEDIA_DIR = path.join(DATA_DIR, 'irregularities');
+const ZAP_RECORDS_PATH = path.join(DATA_DIR, 'zap_records.json');
+const ZAP_MEDIA_DIR = path.join(DATA_DIR, 'zap_records');
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -164,17 +168,18 @@ function syncConfigResultTotals(config) {
 function loadI18n() {
   try {
     if (!fs.existsSync(I18N_PATH)) {
-      return { defaultLanguage: 'sr', multiLanguage: {} };
+      return { defaultLanguage: 'sr', multiLanguage: {}, senderStatuses: [] };
     }
     const raw = fs.readFileSync(I18N_PATH, 'utf8');
     const data = JSON.parse(raw);
     return {
       defaultLanguage: data.defaultLanguage || 'sr',
-      multiLanguage: data.multiLanguage || {}
+      multiLanguage: data.multiLanguage || {},
+      senderStatuses: data.senderStatuses || []
     };
   } catch (err) {
     console.warn('Failed to load multilang.json:', err.message);
-    return { defaultLanguage: 'sr', multiLanguage: {} };
+    return { defaultLanguage: 'sr', multiLanguage: {}, senderStatuses: [] };
   }
 }
 
@@ -185,6 +190,7 @@ function loadConfig() {
     const i18n = loadI18n();
     cfg.defaultLanguage = i18n.defaultLanguage || cfg.defaultLanguage || 'sr';
     cfg.multiLanguage = i18n.multiLanguage || cfg.multiLanguage || {};
+    cfg.senderStatuses = i18n.senderStatuses && i18n.senderStatuses.length ? i18n.senderStatuses : (cfg.senderStatuses || []);
     // load templates from separate file if present
     try {
       if (fs.existsSync(TEMPLATES_PATH)) {
@@ -205,7 +211,7 @@ function loadConfig() {
     return cfg;
   } catch (err) {
     console.error('Failed to load config.json:', err.message);
-    return { regions: [], templates: [], defaultLanguage: 'sr', multiLanguage: loadI18n().multiLanguage || {} };
+    { const i18n = loadI18n(); return { regions: [], templates: [], defaultLanguage: 'sr', multiLanguage: i18n.multiLanguage || {}, senderStatuses: i18n.senderStatuses || [] }; }
   }
 }
 
@@ -493,6 +499,143 @@ function saveSignalRawMessages(arr) {
   fs.writeFileSync(SIGNAL_RAW_MESSAGES_PATH, JSON.stringify(arr, null, 2), 'utf8');
 }
 
+function loadIrregularities() {
+  try {
+    if (!fs.existsSync(IRREGULARITIES_PATH)) fs.writeFileSync(IRREGULARITIES_PATH, '[]', 'utf8');
+    const parsed = JSON.parse(fs.readFileSync(IRREGULARITIES_PATH, 'utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.error('Failed to load irregularities.json:', err.message);
+    return [];
+  }
+}
+
+function saveIrregularities(records) {
+  fs.writeFileSync(IRREGULARITIES_PATH, JSON.stringify(records, null, 2), 'utf8');
+}
+
+function loadZapRecords() {
+  try {
+    if (!fs.existsSync(ZAP_RECORDS_PATH)) fs.writeFileSync(ZAP_RECORDS_PATH, '[]', 'utf8');
+    const parsed = JSON.parse(fs.readFileSync(ZAP_RECORDS_PATH, 'utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.error('Failed to load zap_records.json:', err.message);
+    return [];
+  }
+}
+
+function saveZapRecords(records) {
+  fs.writeFileSync(ZAP_RECORDS_PATH, JSON.stringify(records, null, 2), 'utf8');
+}
+
+function storeZapAttachments(recordId, attachments) {
+  fs.mkdirSync(ZAP_MEDIA_DIR, { recursive: true });
+  return (Array.isArray(attachments) ? attachments : []).map((attachment, index) => {
+    const sourcePath = getAttachmentSourcePath(attachment);
+    const data = decodeAttachmentData(attachment);
+    const extension = getAttachmentExtension(attachment);
+    const storedFilename = `${recordId}-${index}${extension}`;
+    const storedPath = path.join(ZAP_MEDIA_DIR, storedFilename);
+    try {
+      if (sourcePath) fs.copyFileSync(sourcePath, storedPath);
+      else if (data && data.length) fs.writeFileSync(storedPath, data);
+    } catch (err) {
+      console.warn('Failed to store Zap attachment:', err.message);
+    }
+    return {
+      contentType: String(attachment && attachment.contentType || 'application/octet-stream'),
+      filename: String(attachment && attachment.filename || storedFilename),
+      signalId: attachment && attachment.signalId ? String(attachment.signalId) : null,
+      size: toNumber(attachment && attachment.size, data ? data.length : 0),
+      storedFilename: fs.existsSync(storedPath) ? storedFilename : null
+    };
+  });
+}
+
+function saveZapRecord({ sender, senderNumber, groupId, groupName, region, municipality, place, attachments }) {
+  const id = crypto.randomBytes(8).toString('hex') + '-' + Date.now();
+  const records = loadZapRecords().filter((item) => {
+    const sameNumber = senderNumber && item.senderNumber && String(item.senderNumber) === String(senderNumber);
+    const sameSender = sender && item.sender && String(item.sender).trim() === String(sender).trim();
+    return !(sameNumber || sameSender);
+  });
+  const record = { id, sender: sender || null, senderNumber: senderNumber || null, region: region || null, municipality: municipality || null, place: place || null, groupId: groupId || null, groupName: groupName || null, receivedAt: new Date().toISOString(), attachments: storeZapAttachments(id, attachments) };
+  records.push(record);
+  saveZapRecords(records);
+  return record;
+}
+
+function getAttachmentExtension(attachment) {
+  const contentType = String(attachment && attachment.contentType || '').toLowerCase();
+  const known = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif', 'image/heic': '.heic' };
+  if (known[contentType]) return known[contentType];
+  const filename = String(attachment && attachment.filename || '');
+  const extension = path.extname(filename).toLowerCase();
+  return extension && extension.length <= 8 ? extension : '.bin';
+}
+
+function getAttachmentSourcePath(attachment) {
+  if (!attachment || typeof attachment !== 'object') return null;
+  const candidates = [attachment.path, attachment.filename, attachment.filePath, attachment.filepath]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  return candidates.find((value) => {
+    try { return fs.existsSync(value) && fs.statSync(value).isFile(); } catch (err) { return false; }
+  }) || null;
+}
+
+function decodeAttachmentData(attachment) {
+  if (!attachment || typeof attachment !== 'object' || typeof attachment.data !== 'string') return null;
+  const raw = attachment.data.replace(/^data:[^;]+;base64,/, '');
+  try { return Buffer.from(raw, 'base64'); } catch (err) { return null; }
+}
+
+function storeIrregularityAttachments(recordId, attachments) {
+  fs.mkdirSync(IRREGULARITIES_MEDIA_DIR, { recursive: true });
+  return (Array.isArray(attachments) ? attachments : []).map((attachment, index) => {
+    const sourcePath = getAttachmentSourcePath(attachment);
+    const data = decodeAttachmentData(attachment);
+    const extension = getAttachmentExtension(attachment);
+    const storedFilename = `${recordId}-${index}${extension}`;
+    const storedPath = path.join(IRREGULARITIES_MEDIA_DIR, storedFilename);
+    try {
+      if (sourcePath) fs.copyFileSync(sourcePath, storedPath);
+      else if (data && data.length) fs.writeFileSync(storedPath, data);
+    } catch (err) {
+      console.warn('Failed to store irregularity attachment:', err.message);
+    }
+    return {
+      contentType: String(attachment && attachment.contentType || 'application/octet-stream'),
+      filename: String(attachment && attachment.filename || storedFilename),
+      signalId: attachment && attachment.signalId ? String(attachment.signalId) : null,
+      size: toNumber(attachment && attachment.size, data ? data.length : 0),
+      storedFilename: fs.existsSync(storedPath) ? storedFilename : null
+    };
+  });
+}
+
+function addIrregularity({ sender, explanation, attachments, senderNumber, groupId, groupName, region, municipality, place }) {
+  const id = crypto.randomBytes(8).toString('hex') + '-' + Date.now();
+  const records = loadIrregularities();
+  const record = {
+    id,
+    sender: sender || null,
+    senderNumber: senderNumber || null,
+    explanation: String(explanation || '').trim(),
+    region: region || null,
+    municipality: municipality || null,
+    place: place || null,
+    groupId: groupId || null,
+    groupName: groupName || null,
+    receivedAt: new Date().toISOString(),
+    attachments: storeIrregularityAttachments(id, attachments)
+  };
+  records.push(record);
+  saveIrregularities(records);
+  return record;
+}
+
 function formatRawSignalPayload(payload) {
   if (typeof payload === 'string') return payload;
   if (payload == null) return '';
@@ -540,7 +683,10 @@ function isRecentServerOutgoingSignalMessage(text, groupId) {
 }
 
 function saveConfig(config) {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+  // multiLanguage/defaultLanguage/templates/senderStatuses are sourced from multilang.json/templates.json
+  // and merged into the in-memory config at load time; never persist them back into config.json.
+  const { multiLanguage, defaultLanguage, templates, senderStatuses, ...persisted } = config;
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(persisted, null, 2), 'utf8');
 }
 
 function addAcceptedSignalRecord({ sender, text, groupId, groupName, direction = 'incoming', region = null, place = null, type = 'signal', payload = {} }) {
@@ -651,7 +797,7 @@ const parseRezPairs = (...args) => messageModules.rezultati.parseRezPairs(...arg
 
 const buildRezultatiAcceptedReply = (...args) => messageModules.rezultati.buildRezultatiAcceptedReply(...args);
 
-async function handleIncomingMessageProcessing({ sender, senderNumber = null, text, groupId, groupName, direction = 'incoming', region = null, place = null }) {
+async function handleIncomingMessageProcessing({ sender, senderNumber = null, text, attachments = [], groupId, groupName, direction = 'incoming', region = null, place = null }) {
   const config = loadConfig();
   const matched = matchTemplates(config, text);
   if (!matched) {
@@ -794,7 +940,7 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
   }
 
   const votePlace = findPlaceConfigBySender(config, senderCfg.region, senderCfg.municipality, senderCfg.place);
-  if (votePlace && String(votePlace.senderStatus) === '0' && matched.type !== 'status' && matched.type !== 'help') {
+  if (votePlace && String(votePlace.senderStatus) === '0' && matched.type !== 'status' && matched.type !== 'help' && matched.type !== 'irregularity') {
     const i18n = loadI18n();
     const msg = (i18n.multiLanguage && i18n.multiLanguage.sr && i18n.multiLanguage.sr.ui &&
       i18n.multiLanguage.sr.ui.signalStatusZeroReply) ||
@@ -804,6 +950,113 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
       await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
     }
     return { accepted: false, reason: 'sender-status-zero' };
+  }
+
+  if (matched.type === 'zapRecord') {
+    const placeName = senderCfg.place || senderCfg.parentPlace || 'непознато место';
+    const municipalityName = senderCfg.municipality || senderCfg.region || 'непозната општина';
+    const zapRecords = loadZapRecords();
+    const existing = zapRecords.find((item) => {
+      const sameNumber = senderNumber && item.senderNumber && String(item.senderNumber) === String(senderNumber);
+      const sameSender = sender && item.sender && String(item.sender).trim() === String(sender).trim();
+      return sameNumber || sameSender;
+    });
+    if (String(votePlace && votePlace.senderStatus || '') !== '6') {
+      const template = getI18nUiString('sr', 'signalZapStatusRequiredReply', 'За бирачко место "{placeName}", "{municipalityName}" прво промените статус у Zap командом: Sta: Zap.');
+      const replyText = fillTemplate(template, { placeName, municipalityName });
+      if (senderNumber || groupId) await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
+      return { accepted: false, reason: 'zap-status-required', statusRequired: true };
+    }
+    const imageAttachments = attachments.filter((attachment) => String(attachment && attachment.contentType || '').toLowerCase().startsWith('image/'));
+    if (!imageAttachments.length) {
+      const message = existing ? 'Записник је већ послат.' : 'Записник још није послат.';
+      const template = getI18nUiString('sr', 'signalZapQueryReply', 'За бирачко место "{placeName}", "{municipalityName}": {message}');
+      const replyText = fillTemplate(template, { placeName, municipalityName, message });
+      if (senderNumber || groupId) await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
+      return { accepted: true, queryOnly: true, alreadySent: Boolean(existing) };
+    }
+    const zapRecord = saveZapRecord({ sender, senderNumber, groupId, groupName, region: senderCfg.region, municipality: senderCfg.municipality || senderCfg.region, place: senderCfg.place || senderCfg.parentPlace, attachments: imageAttachments });
+    const template = getI18nUiString('sr', 'signalZapAcceptedReply', 'Записник са бирачког места "{placeName}", "{municipalityName}" је успешно евидентиран.');
+    const replyText = fillTemplate(template, { placeName, municipalityName });
+    if (senderNumber || groupId) await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
+    return { accepted: true, zapRecord, record: addAcceptedSignalRecord({ sender, text, groupId, groupName, direction, region: senderCfg.region, place: senderCfg.place || senderCfg.parentPlace, type: matched.type, payload: { zapRecordId: zapRecord.id } }) };
+  }
+
+  if (matched.type === 'irregularity') {
+    const replyPlaceName = senderCfg.place || senderCfg.parentPlace || 'непознато место';
+    const replyMunicipalityName = senderCfg.municipality || senderCfg.region || 'непозната општина';
+    const senderRecords = loadIrregularities().filter((item) => {
+      const sameNumber = senderNumber && item.senderNumber && String(item.senderNumber) === String(senderNumber);
+      const sameSender = sender && item.sender && String(item.sender).trim() === String(sender).trim();
+      return sameNumber || sameSender;
+    });
+    const explanation = String(matched.fields.explanation || '').trim();
+    if (!explanation) {
+      const replyText = getI18nUiString('sr', 'signalNepCountReply', 'За бирачко место "{placeName}", "{municipalityName}", евидентирано је неправилности: {count}.');
+      const formattedReply = fillTemplate(replyText, {
+        count: senderRecords.length,
+        placeName: replyPlaceName,
+        municipalityName: replyMunicipalityName
+      });
+      if (senderNumber || groupId) {
+        const replyStatus = await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: formattedReply });
+        if (replyStatus.ok) {
+          addAcceptedSignalRecord({ sender: 'local-backend', text: formattedReply, groupId, groupName, direction: 'outgoing', region: senderCfg.region || null, place: senderCfg.place || null, type: 'irregularity-count-reply', payload: { count: senderRecords.length } });
+        }
+      }
+      return { accepted: true, queryOnly: true, irregularityCount: senderRecords.length };
+    }
+    const imageAttachments = attachments.filter((attachment) => String(attachment && attachment.contentType || '').toLowerCase().startsWith('image/'));
+    if (!imageAttachments.length) {
+      const photoRequiredTemplate = getI18nUiString('sr', 'signalNepPhotoRequiredReply', 'Пријава неправилности за бирачко место "{placeName}", "{municipalityName}" није евидентирана. Уз команду Nep морате послати и фотографију.');
+      const photoRequiredReply = fillTemplate(photoRequiredTemplate, {
+        placeName: replyPlaceName,
+        municipalityName: replyMunicipalityName
+      });
+      if (senderNumber || groupId) {
+        const replyStatus = await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: photoRequiredReply });
+        if (replyStatus.ok) {
+          addAcceptedSignalRecord({ sender: 'local-backend', text: photoRequiredReply, groupId, groupName, direction: 'outgoing', region: senderCfg.region || null, place: senderCfg.place || senderCfg.parentPlace || null, type: 'irregularity-photo-required-reply', payload: { reason: 'irregularity-photo-required' } });
+        }
+      }
+      return { accepted: false, reason: 'irregularity-photo-required', replySent: Boolean(senderNumber || groupId) };
+    }
+    const irregularity = addIrregularity({
+      sender,
+      senderNumber,
+      explanation: matched.fields.explanation,
+      attachments: imageAttachments,
+      groupId,
+      groupName,
+      region: senderCfg.region,
+      municipality: senderCfg.municipality,
+      place: senderCfg.place
+    });
+    const record = addAcceptedSignalRecord({
+      sender,
+      text,
+      groupId,
+      groupName,
+      direction,
+      region: senderCfg.region,
+      place: senderCfg.place,
+      type: matched.type,
+      payload: { irregularityId: irregularity.id, attachmentCount: imageAttachments.length }
+    });
+    const acceptedCount = senderRecords.length + 1;
+    const acceptedReplyTemplate = getI18nUiString('sr', 'signalNepAcceptedReply', 'Неправилност је успешно евидентирана за бирачко место "{placeName}", "{municipalityName}". Укупно евидентираних неправилности на овом месту: {count}.');
+    const acceptedReply = fillTemplate(acceptedReplyTemplate, {
+      count: acceptedCount,
+      placeName: replyPlaceName,
+      municipalityName: replyMunicipalityName
+    });
+    if (senderNumber || groupId) {
+      const replyStatus = await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: acceptedReply });
+      if (replyStatus.ok) {
+        addAcceptedSignalRecord({ sender: 'local-backend', text: acceptedReply, groupId, groupName, direction: 'outgoing', region: senderCfg.region || null, place: senderCfg.place || null, type: 'irregularity-accepted-reply', payload: { irregularityId: irregularity.id, count: acceptedCount } });
+      }
+    }
+    return { accepted: true, record, irregularity };
   }
 
   if (matched.type === 'help') {
@@ -1156,6 +1409,10 @@ function normalizeSignalEnvelope(rawEnvelope) {
 
   const sender = envelope.sourceName || envelope.sourceUuid || envelope.sourceNumber || envelope.source || 'unknown-signal-user';
   let text = null;
+  const messageSource = sentMessage || dataMessage || envelope;
+  const attachments = Array.isArray(messageSource.attachments)
+    ? messageSource.attachments
+    : (Array.isArray(envelope.attachments) ? envelope.attachments : []);
 
   if (sentMessage && typeof sentMessage.message === 'string') {
     text = sentMessage.message;
@@ -1173,11 +1430,29 @@ function normalizeSignalEnvelope(rawEnvelope) {
     sender: String(sender).trim() || 'unknown-signal-user',
     senderNumber: envelope.sourceNumber ? String(envelope.sourceNumber) : null,
     text: String(text).trim(),
+    attachments,
     groupId: groupInfo && (groupInfo.groupId || groupInfo.id) ? String(groupInfo.groupId || groupInfo.id) : null,
     groupName: groupInfo && (groupInfo.groupName || groupInfo.name) ? String(groupInfo.groupName || groupInfo.name) : null,
     timestamp: envelope.timestamp || Date.now(),
     isSyncSent: Boolean(sentMessage)
   };
+}
+
+async function hydrateSignalAttachments(attachments, { groupId = null, senderNumber = null } = {}) {
+  return Promise.all((Array.isArray(attachments) ? attachments : []).map(async (attachment) => {
+    if (!attachment || typeof attachment !== 'object') return attachment;
+    if (attachment.path || attachment.filePath || attachment.filepath || attachment.data) return attachment;
+    const id = attachment.id || attachment.attachmentId || attachment.signalId;
+    if (!id) return attachment;
+    const params = { id: String(id) };
+    if (groupId) params.groupId = groupId;
+    else if (senderNumber) params.recipient = senderNumber;
+    const response = await querySignalDaemon('getAttachment', params, 15000);
+    const data = response && response.result && response.result.data;
+    return typeof data === 'string' && data
+      ? { ...attachment, data, signalId: String(id) }
+      : { ...attachment, signalId: String(id) };
+  }));
 }
 
 async function processSignalCaptureLine(line) {
@@ -1199,6 +1474,7 @@ async function processSignalCaptureLine(line) {
       sender: payload.sender,
       senderNumber: payload.senderNumber,
       text: payload.text,
+      attachments: await hydrateSignalAttachments(payload.attachments, payload),
       groupId: payload.groupId,
       groupName: payload.groupName,
       direction: 'incoming'
@@ -1307,6 +1583,7 @@ async function startSignalCaptureLoop() {
         sender: payload.sender,
         senderNumber: payload.senderNumber,
         text: payload.text,
+        attachments: await hydrateSignalAttachments(payload.attachments, payload),
         groupId: payload.groupId,
         groupName: payload.groupName,
         direction: 'incoming'
@@ -1975,6 +2252,68 @@ app.get('/api/signal/raw-messages', (req, res) => {
   return res.json(all);
 });
 
+app.get('/api/irregularities', async (req, res) => {
+  const records = loadIrregularities();
+  let changed = false;
+  for (const record of records) {
+    for (const attachment of Array.isArray(record.attachments) ? record.attachments : []) {
+      if (!attachment || attachment.storedFilename || !attachment.signalId) continue;
+      const hydrated = await hydrateSignalAttachments([attachment], { groupId: record.groupId, senderNumber: record.senderNumber });
+      const stored = storeIrregularityAttachments(record.id, hydrated)[0];
+      Object.assign(attachment, stored);
+      changed = Boolean(stored.storedFilename) || changed;
+    }
+  }
+  if (changed) saveIrregularities(records);
+  res.json(records.slice().sort((a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0)));
+});
+
+app.get('/api/irregularities/:id/attachments/:index', (req, res) => {
+  const record = loadIrregularities().find((item) => String(item.id) === String(req.params.id));
+  const attachment = record && record.attachments && record.attachments[Number(req.params.index)];
+  if (!attachment || !attachment.storedFilename) return res.status(404).end();
+  const filePath = path.join(IRREGULARITIES_MEDIA_DIR, path.basename(attachment.storedFilename));
+  if (!fs.existsSync(filePath)) return res.status(404).end();
+  res.type(attachment.contentType || path.extname(filePath)).sendFile(filePath);
+});
+
+app.delete('/api/irregularities', (req, res) => {
+  const records = loadIrregularities();
+  for (const record of records) {
+    for (const attachment of Array.isArray(record.attachments) ? record.attachments : []) {
+      if (!attachment || !attachment.storedFilename) continue;
+      try { fs.unlinkSync(path.join(IRREGULARITIES_MEDIA_DIR, path.basename(attachment.storedFilename))); } catch (err) { /* ignore missing file */ }
+    }
+  }
+  saveIrregularities([]);
+  res.json({ ok: true, removed: records.length });
+});
+
+app.get('/api/zap-records', (req, res) => {
+  res.json(loadZapRecords().slice().sort((a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0)));
+});
+
+app.delete('/api/zap-records', (req, res) => {
+  const records = loadZapRecords();
+  for (const record of records) {
+    for (const attachment of Array.isArray(record.attachments) ? record.attachments : []) {
+      if (!attachment || !attachment.storedFilename) continue;
+      try { fs.unlinkSync(path.join(ZAP_MEDIA_DIR, path.basename(attachment.storedFilename))); } catch (err) { /* ignore missing file */ }
+    }
+  }
+  saveZapRecords([]);
+  res.json({ ok: true, removed: records.length });
+});
+
+app.get('/api/zap-records/:id/attachments/:index', (req, res) => {
+  const record = loadZapRecords().find((item) => String(item.id) === String(req.params.id));
+  const attachment = record && record.attachments && record.attachments[Number(req.params.index)];
+  if (!attachment || !attachment.storedFilename) return res.status(404).end();
+  const filePath = path.join(ZAP_MEDIA_DIR, path.basename(attachment.storedFilename));
+  if (!fs.existsSync(filePath)) return res.status(404).end();
+  res.type(attachment.contentType || path.extname(filePath)).sendFile(filePath);
+});
+
 app.delete('/api/signal/raw-messages', (req, res) => {
   const direction = String(req.query.direction || '').toLowerCase();
   if (direction && direction !== 'incoming' && direction !== 'outgoing') {
@@ -2007,6 +2346,7 @@ app.post('/api/messages', async (req, res) => {
       sender,
       senderNumber: payload.senderNumber || null,
       text,
+      attachments: Array.isArray(payload.attachments) ? payload.attachments : [],
       groupId,
       groupName,
       direction: 'incoming'

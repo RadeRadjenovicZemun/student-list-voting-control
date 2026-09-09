@@ -1,0 +1,634 @@
+{
+  "defaultLanguage": "sr",
+  "senderStatuses": [
+    { "id": "0", "name": "Неактиван", "codeName": "Passive", "alias": "Н" },
+    { "id": "1", "name": "Присутан", "codeName": "Active", "alias": "А" },
+    { "id": "2", "name": "Гласање у току", "codeName": "Voting", "alias": "Г" },
+    { "id": "3", "name": "Прекид на изборном месту", "codeName": "Stopped", "alias": "П" },
+    { "id": "4", "name": "Бројање гласове", "codeName": "Counting", "alias": "Б" },
+    { "id": "5", "name": "Прелиминарни резултати", "codeName": "Preliminary", "alias": "Р" },
+    { "id": "6", "name": "Потписан записник", "codeName": "Official", "alias": "З" }
+  ],
+  "multiLanguage": {
+    "sr": {
+      "title": "Парламентарни избори 2026",
+      "dashboard": "Copyright © 2026 Студентска листа. Сва права задржана.",
+      "ui": {
+        "dashboard": "Dashboard",
+        "bannerTime": "ВРЕМЕ",
+        "duration": "ТРАЈАЊЕ",
+        "totalRegistered": "Укупан број бирача",
+        "totalVotingPlaces": "Укупан број бирачких места",
+        "totalVoted": "Укупан број изашлих бирача",
+        "turnout": "Излазност",
+        "rikSource": "Извор <a href=\"https://www.rik.parlament.gov.rs/542645/sr/rezultati/\" target=\"_blank\" rel=\"noopener\">РИК</a>",
+        "turnoutTabs": {
+          "perRegion": "Излазност по регионима",
+          "coverage": "Покривеност"
+        },
+        "resultsTabs": {
+          "perRegion": "Резултати по регионима",
+          "coverage": "Покривеност"
+        },
+        "coverage": "ПОКРИВЕНОСТ КОНТРОЛОРИМА",
+        "registeredControllers": "Регистрованих",
+        "activeControllers": "Активних",
+        "tableName": "Име",
+        "tableRegistered": "Број бирача",
+        "tableVoted": "Гласали",
+        "tableVotedInPlace": "На изборном месту",
+        "tableVotedFromHome": "Од куће",
+        "tableVotedTotal": "Укупно",
+        "tableBallots": "Листићи",
+        "tableBallotsValid": "Важећи",
+        "tableBallotsNonValid": "Неважећи",
+        "tableBallotsRemaining": "Преостали",
+        "tableTurnout": "Излазност",
+        "tableTurnoutNumber": "Број",
+        "tableTurnoutPercent": "Проценат",
+        "turnoutInPlaceLabel": "У месту:",
+        "turnoutFromHomeLabel": "Од куће:",
+        "config": "Config: static (edit data/config.json)",
+        "lastUpdated": "Last updated:",
+        "regionChartTitle": "Графика",
+        "regionSummaryTitle": "Подаци",
+        "settingsTabs": {
+          "stopwatch": "Штоперица",
+          "electionPhase": "Фаза избора",
+          "signal": "Signal"
+        },
+        "signalDescription": "Повезује се са Signal групом која прикупља изборне резултате и различите статусе",
+        "signalOfflineMessage": "Молимо покрените Signal апликацију на овом рачунару.",
+        "signalBridgeLabel": "Мост",
+        "signalCountdownLabel": "Следећа провера",
+        "signalMessageLabel": "Порука",
+        "signalIncomingTab": "Долазне",
+        "signalOutgoingTab": "Одлазне",
+        "signalColumnFilterLabel": "Филтер",
+        "signalColumnDate": "Датум",
+        "signalColumnTime": "Време",
+        "signalColumnSenderTarget": "Пошиљалац/Прималац",
+        "signalColumnMessage": "Тип поруке",
+        "signalFilterAll": "СВЕ",
+        "signalFilterDateFrom": "Датум од",
+        "signalFilterDateTo": "Датум до",
+        "signalFilterTimeFrom": "Време од",
+        "signalFilterTimeTo": "Време до",
+        "signalFilterParty": "Пошиљалац/Прималац",
+        "signalFilterMessage": "Порука",
+        "signalFilterMessageType": "Тип поруке",
+        "signalTableDate": "Датум",
+        "signalTableTime": "Време",
+        "signalTableWhen": "Време",
+        "signalTableSender": "Пошиљалац",
+        "signalTableTarget": "Прималац",
+        "signalTableMessage": "Порука",
+        "signalEmptyIncoming": "Нема долазних порука за ову групу.",
+        "signalEmptyOutgoing": "Нема одлазних порука за ову групу.",
+        "signalGroupLabel": "Signal група",
+        "signalGroupPlaceholder": "-- Изабери групу --",
+        "signalRegistrationAcceptedReply": "Регистровани сте као контролор на бирачком месту,\n\"{placeName}\", \"{municipalityName}\".\nБрој регистрованих бирача је {registeredVoters}.",
+        "signalRegistrationQueryReply": "Регистровани сте као контролор на бирачком месту,\n\"{placeName}\", \"{municipalityName}\".\nБрој регистрованих бирача је {registeredVoters}.",
+        "signalRegistrationNotRegisteredReply": "Нисте регистровани ни на једном бирачком месту.",
+        "signalRegistrationFailedReply": "Регистрација није прихваћена. Проверите ID бирачког места и покушајте поново.",
+        "signalIzlaznostQueryReply": "На бирачком месту {location}, број изашлих:\nНа бирачком месту је: {count}.\nГласало од куће: {votedFromHome}.",
+        "signalIzlaznostAcceptedReply": "За бирачко место \"{placeName}\", \"{municipalityName}\", са регистрованих {registeredVoters} гласача, успешно је ажурирана промена броја изашлих:\nНа бирачком месту: {count}\nГласало од куће: {votedFromHome}",
+        "signalStatusAcceptedReply": "Статус бирачког места {location} је успешно промењен у: {statusLabel}.",
+        "signalStatusLabels": {
+          "0": "Неактиван",
+          "1": "Активан",
+          "2": "Гласање у току",
+          "3": "Прекид гласања",
+          "4": "Бројање гласова",
+          "5": "Прелиминарни резултати",
+          "6": "Потписан записник"
+        },
+        "signalRezultatiQueryReply": "Тренутно регистрован број гласова:\n{candidates}\nНеважећи листићи: {nonRegularBallots}\nПреостали листићи: {remainingBallots}",
+        "signalRezultatiAcceptedReply": "Резултати гласања су успешно ажурирани:\n{candidates}\nНеважећи листићи: {nonRegularBallots}\nПреостали листићи: {remainingBallots}",
+        "signalNepCountReply": "За бирачко место \"{placeName}\", \"{municipalityName}\", евидентирано је неправилности: {count}.",
+        "signalNepAcceptedReply": "Неправилност је успешно евидентирана за бирачко место \"{placeName}\", \"{municipalityName}\". Укупно евидентираних неправилности на овом месту: {count}.",
+        "signalNepPhotoRequiredReply": "Пријава неправилности за бирачко место \"{placeName}\", \"{municipalityName}\" није евидентирана. Уз команду Nep морате послати и фотографију.",
+        "signalZapQueryReply": "За бирачко место \"{placeName}\", \"{municipalityName}\": {message}",
+        "signalZapAcceptedReply": "Записник са бирачког места \"{placeName}\", \"{municipalityName}\" је успешно евидентиран.",
+        "signalZapPhotoRequiredReply": "Команда Zap за бирачко место \"{placeName}\", \"{municipalityName}\" захтева приложену фотографију.",
+        "signalZapStatusRequiredReply": "За бирачко место \"{placeName}\", \"{municipalityName}\" прво промените статус у Zap командом: Sta: Zap.",
+        "signalNotRegisteredReply": "Да бисте послали захтев, морате се прво регистровати!",
+        "signalStatusZeroReply": "Да бисте послали захтев, прво промените свој статус!",
+        "signalHelpReply": "Доступне команде: {commands}",
+        "signalHelpDetailReply": "Команда: {name}\nОпис: {description}\nФормат: {format}\nПример: {example}",
+        "signalHelpUnknownCommand": "Непозната команда: {name}. Пошаљите '?:' за листу доступних команди.",
+        "signalCommandHelp": {
+          "Reg": {
+            "description": "Региструје контролора за одређено бирачко месте по неговом нумеричком ID-у.",
+            "format": "Reg: N.N.N.N",
+            "example": "Reg: 1.7.1.76"
+          },
+          "Izl": {
+            "description": "Проверава или ажурира излазност за бирачко место пошиљаоца. 'Izl:' проверава стање, 'Izl: N' или 'Izl: N.' поставља број гласалих, 'Izl: .M' поставља број гласалих од куће, а 'Izl: N.M' поставља оба броја.",
+            "format": "Izl: [N[.M]]",
+            "example": "Izl: 35.4"
+          },
+          "Sta": {
+            "description": "Поставља статус бирачког места пошиљаоца.",
+            "format": "Sta: <Akt|Gls|Prk|Bro|Prl|Zap>",
+            "example": "Sta: Akt"
+          },
+          "Rez": {
+            "description": "Ажурира гласове кандидата или бројаче листића. Сваки пар је N.M или P.M: N/n/Н/н означава нерегуларне листиће, P/p/П/п означава преостале листиће, а број означава редни број кандидата. M је број.",
+            "format": "Rez: <број|N|P>.M [<број|N|P>.M ...]",
+            "example": "Rez: 1.20 2.30 3.45"
+          },
+          "Nep": {
+            "description": "Пријављује неправилност кратким објашњењем и приложеном фотографијом.",
+            "format": "Nep: <кратко објашњење> + фотографија",
+            "example": "Nep: Оштећен гласачки листић"
+          },
+          "?": {
+            "description": "Приказује листу доступних команди, или детаље о одређеној команди.",
+            "format": "?: [<команда>]",
+            "example": "?: Izl"
+          }
+        },
+        "debugInProgressTab": "Сирове поруке",
+        "debugMessageTab": "Поруке",
+        "debugIrregularitiesTab": "Неправилности",
+        "irregularitiesDate": "Датум",
+        "irregularitiesTime": "Време",
+        "irregularitiesSender": "Пошиљалац",
+        "irregularitiesPlace": "Бирачко место",
+        "irregularitiesExplanation": "Објашњење",
+        "irregularitiesPhoto": "Фотографија",
+        "irregularitiesEmpty": "Нема пријављених неправилности.",
+        "irregularitiesTreeTitle": "Бирачка места",
+        "irregularitiesAll": "Сва",
+        "irregularitiesPreview": "Преглед",
+        "irregularitiesPreviewTitle": "Извештај о инциденту неправилности на гласању",
+        "irregularitiesFile": "Датотека",
+        "irregularitiesSave": "Сачувај",
+        "irregularitiesSaveAs": "Сачувај као",
+        "irregularitiesRegion": "Регион",
+        "irregularitiesMunicipality": "Општина",
+        "irregularitiesDateTime": "Датум и време",
+        "irregularitiesIncidentStatement": "Ово је извештај о инциденту неправилности на гласању.",
+        "zapRecordsEmpty": "Нема евидентираних записника.",
+        "zapPhoto": "Фотографија",
+        "zapPreviewTitle": "Записник са бирачког места",
+        "zapPreviewStatement": "Ово је записник са бирачког места.",
+        "debugDatabaseTab": "База података",
+        "dbClearDataBtn": "Обриши податке",
+        "dbClearRawMessagesLabel": "Обриши све сирове поруке",
+        "dbClearRawMessagesConfirm": "Обрисати све сирове поруке? Ова радња се не може опозвати.",
+        "dbClearRawMessagesSuccess": "Обрисано сирових порука: {count}.",
+        "dbClearRawMessagesFailed": "Грешка при брисању сирових порука.",
+        "dbClearSender": "Обриши пошиљаоца",
+        "dbClearStatus": "Обриши статус",
+        "dbClearTurnout": "Обриши одазив",
+        "dbClearResults": "Обриши резултате",
+        "dbClearCorrection": "Обриши корекцију",
+        "dbClearIrregularities": "Обриши све неправилности",
+        "dbClearIrregularitiesConfirm": "Обрисати све неправилности? Ова радња се не може опозвати.",
+        "dbClearZapRecords": "Обриши све записнике о гласању",
+        "dbClearZapRecordsConfirm": "Обрисати све записнике о гласању? Ова радња се не може опозвати.",
+        "dbClearNoneSelected": "Изаберите барем једну опцију.",
+        "dbClearSuccess": "Подаци су успешно обрисани.",
+        "dbClearFailed": "Грешка: ",
+        "debugTotalAcceptedMessages": "Укупно прихваћених порука:",
+        "debugSubmitTestMessageTitle": "Пошаљи тест поруку",
+        "debugSendToLocalBackendBtn": "Пошаљи локалном серверу",
+        "debugRecentMessagesTitle": "Последње поруке",
+        "debugTableWhen": "Када",
+        "debugTableSender": "Пошиљалац",
+        "debugTableRegion": "Регион",
+        "debugTablePlace": "Место",
+        "debugTableType": "Тип",
+        "debugDeleteSelectedMessagesBtn": "Обриши означене поруке",
+        "debugDeleteSelectedNone": "Означите барем једну поруку.",
+        "debugDeleteSelectedResult": "Обрисано порука: {count}.",
+        "debugDeleteIncomingMessagesBtn": "Обриши долазне поруке",
+        "debugDeleteOutgoingMessagesBtn": "Обриши одлазне поруке",
+        "debugRawMessagesTitle": "Raw Signal bridge messages",
+        "debugRawDateHeader": "Date",
+        "debugRawTimeHeader": "Time",
+        "debugRawDirectionHeader": "Direction",
+        "debugRawPayloadHeader": "Raw payload",
+        "debugRawMessagesEmpty": "No raw Signal bridge messages.",
+        "debugDirectionIncoming": "incoming",
+        "debugDirectionOutgoing": "outgoing",
+        "debugDeleteResult": "Deleted {direction} messages: accepted={acceptedCount}, raw={rawCount}.",
+        "debugDeleteFailed": "Failed to delete messages.",
+        "electionPhaseTabs": {
+          "parliamentaryElections": "Парламентарни избори",
+          "presidentalElection": "Председнички избори",
+          "localElections": "Локални избори"
+        },
+        "parliamentaryPhaseSelector": {
+          "label": "Изабери фазу парламентарних избора",
+          "preparationPhase": "Припрема",
+          "electionDay": "Дан избора",
+          "repeatedElections": "Поновљени избори"
+        },
+        "parliamentaryPhaseTitles": {
+          "preparationPhase": "Парламентарни избори 2026 - Припрема",
+          "electionDay": "Парламентарни избори 2026 - Дан избора",
+          "repeatedElections": "Парламентарни избори 2026 - Поновљени избори"
+        },
+        "localTitle": "Локални избори 2026",
+        "localPhaseSelector": {
+          "label": "Изабери фазу локалних избора",
+          "preparationPhase": "Припрема",
+          "electionDay": "Дан избора",
+          "repeatedElections": "Поновљени избори"
+        },
+        "localPhaseTitles": {
+          "preparationPhase": "Припрема",
+          "electionDay": "Дан избора",
+          "repeatedElections": "Поновљени избори"
+        },
+        "presidentalPhaseSelector": {
+          "label": "Изабери фазу председничких избора",
+          "preparation": "Припрема",
+          "firstRoundElectionDay": "Први круг - дан избора",
+          "firstroundRepededElections": "Први круг - поновљени избори",
+          "secondRoudelectionDay": "Други круг - дан избора",
+          "secondRoundRepeetadelections": "Други круг - поновљени избори"
+        },
+        "presidentalTitle": "Председнички избори 2026",
+        "presidentalPhaseTitles": {
+          "preparation": "Припрема",
+          "firstRoundElectionDay": "Први круг",
+          "firstroundRepededElections": "Први круг - Поновљени избори",
+          "secondRoudelectionDay": "Други круг",
+          "secondRoundRepeetadelections": "Други круг - Поновљени избори"
+        },
+        "noElectionSelected": "Ниједан избор није изабран",
+        "parliamentaryOnlyNotice": "Овај приказ је тренутно доступан само за парламентарне изборе.",
+        "underConstruction": "У току израда",
+        "stopwatchTitle": "Штоперица",
+        "startButton": "Покрени",
+        "stopButton": "Заустави",
+        "stopwatchRunning": "У току",
+        "stopwatchStopped": "Заустављено",
+        "stopwatchDurationLabel": "Трајање",
+        "stopwatchDescription": "Покрени и прати трајање изборне фазе",
+        "signalRegAlreadyRegisteredReply": "Регистрација није прихваћена, већ сте регистровани за бирачко место {location}.",
+        "signalRegPlaceTakenReply": "Регистрација за {location} није прихваћена, други контролор је већ регистрован за ово бирачко место.",
+        "stopwatchDateLabel": "Датум",
+        "tableControllerActivity": "Активност контролора",
+        "controllerStatus0": "Није покривено",
+        "controllerStatus1": "Регистрован",
+        "controllerStatus2": "Гласање у току",
+        "controllerStatus3": "Прекид гласања",
+        "controllerStatus4": "Бројање гласова",
+        "controllerStatus5": "Прелиминарни резултати",
+        "controllerStatus6": "Потписан записник"
+      },
+      "navigation": [
+        {
+          "id": "izlaznost",
+          "label": "Излазност"
+        },
+        {
+          "id": "rezultati",
+          "label": "Изборни резултати"
+        },
+        {
+          "id": "irregularities",
+          "label": "Неправилности"
+        },
+        {
+          "id": "zap-records",
+          "label": "Записници"
+        },
+        {
+          "id": "debug",
+          "label": "Алати"
+        },
+        {
+          "id": "language",
+          "label": "Језик"
+        }
+      ],
+      "debugTabs": {
+        "main": "Debug",
+        "settings": "Подешавања"
+      },
+      "languageSelector": {
+        "label": "Језик",
+        "options": {
+          "sr": "Српски",
+          "en": "Енглески"
+        }
+      }
+    },
+    "en": {
+      "title": "Parliamentary Elections 2026",
+      "dashboard": "Copyright © 2026 Student List. All rights reserved.",
+      "ui": {
+        "dashboard": "Dashboard",
+        "bannerTime": "TIME",
+        "duration": "DURATION",
+        "totalRegistered": "Total registered voters",
+        "totalVotingPlaces": "Total registered voting places",
+        "totalVoted": "Total voters who turned out",
+        "turnout": "Turnout",
+        "rikSource": "Source <a href=\"https://www.rik.parlament.gov.rs/542645/sr/rezultati/\" target=\"_blank\" rel=\"noopener\">RIK</a>",
+        "turnoutTabs": {
+          "perRegion": "Turnout per Region",
+          "coverage": "Coverage"
+        },
+        "resultsTabs": {
+          "perRegion": "Results per Region",
+          "coverage": "Coverage"
+        },
+        "coverage": "CONTROLLERS COVERAGE",
+        "registeredControllers": "Registered",
+        "activeControllers": "Active",
+        "tableName": "Name",
+        "tableRegistered": "Registered",
+        "tableVoted": "Voted",
+        "tableVotedInPlace": "Voted in Place",
+        "tableVotedFromHome": "Voted from Home",
+        "tableVotedTotal": "Total",
+        "tableBallots": "Ballots",
+        "tableBallotsValid": "Valid",
+        "tableBallotsNonValid": "Non valid",
+        "tableBallotsRemaining": "Remaining",
+        "tableTurnout": "Turnout",
+        "tableTurnoutNumber": "Number",
+        "tableTurnoutPercent": "Percentage",
+        "turnoutInPlaceLabel": "In Place:",
+        "turnoutFromHomeLabel": "From Home:",
+        "config": "Config: static (edit data/config.json)",
+        "lastUpdated": "Last updated:",
+        "regionChartTitle": "Graphics",
+        "regionSummaryTitle": "Data",
+        "settingsTabs": {
+          "stopwatch": "Stopwatch",
+          "electionPhase": "ElectionPhase",
+          "signal": "Signal"
+        },
+        "signalDescription": "Connects to Signal App group responsible for collecting election results and different statuses",
+        "signalOfflineMessage": "Please start Signal App on this computer.",
+        "signalBridgeLabel": "Bridge",
+        "signalCountdownLabel": "Next check",
+        "signalMessageLabel": "Message",
+        "signalIncomingTab": "Incoming",
+        "signalOutgoingTab": "Outgoing",
+        "signalColumnFilterLabel": "Filter",
+        "signalColumnDate": "Date",
+        "signalColumnTime": "Time",
+        "signalColumnSenderTarget": "Sender/Target",
+        "signalColumnMessage": "Message type",
+        "signalFilterAll": "ALL",
+        "signalFilterDateFrom": "Date from",
+        "signalFilterDateTo": "Date to",
+        "signalFilterTimeFrom": "Time from",
+        "signalFilterTimeTo": "Time to",
+        "signalFilterParty": "Sender/Target",
+        "signalFilterMessage": "Message",
+        "signalFilterMessageType": "Message type",
+        "signalTableDate": "Date",
+        "signalTableTime": "Time",
+        "signalTableWhen": "When",
+        "signalTableSender": "Sender",
+        "signalTableTarget": "Target",
+        "signalTableMessage": "Message",
+        "signalEmptyIncoming": "No incoming messages for this group yet.",
+        "signalEmptyOutgoing": "No outgoing messages for this group yet.",
+        "signalGroupLabel": "Signal group",
+        "signalGroupPlaceholder": "-- Select group --",
+        "signalRegistrationAcceptedReply": "You are registered as a controller at,\n\"{placeName}\", \"{municipalityName}\".\nThe registered number of voters is {registeredVoters}.",
+        "signalRegistrationQueryReply": "You are registered as a controller at,\n\"{placeName}\", \"{municipalityName}\".\nThe registered number of voters is {registeredVoters}.",
+        "signalRegistrationNotRegisteredReply": "You are not registered at any voting place.",
+        "signalRegistrationFailedReply": "Registration was not accepted. Check the voting-place ID and try again.",
+        "signalIzlaznostQueryReply": "Voting place {location}: in place {count}, from home {votedFromHome}.",
+        "signalIzlaznostAcceptedReply": "For voting place \"{placeName}\", \"{municipalityName}\", with {registeredVoters} registered voters, the turnout update was successful:\nAt polling place: {count}\nFrom home: {votedFromHome}",
+        "signalStatusAcceptedReply": "Status of voting place {location} has been changed to: {statusLabel}.",
+        "signalStatusLabels": {
+          "0": "Inactive",
+          "1": "Active",
+          "2": "Voting in progress",
+          "3": "Voting breaked",
+          "4": "Voting counting",
+          "5": "Preliminary",
+          "6": "Minutes signed"
+        },
+        "signalRezultatiQueryReply": "Currently registered vote count:\n{candidates}\nNon-valid ballots: {nonRegularBallots}\nRemaining ballots: {remainingBallots}",
+        "signalRezultatiAcceptedReply": "Voting results have been successfully updated:\n{candidates}\nNon-valid ballots: {nonRegularBallots}\nRemaining ballots: {remainingBallots}",
+        "signalNepCountReply": "For voting place \"{placeName}\", \"{municipalityName}\", irregularities recorded: {count}.",
+        "signalNepAcceptedReply": "The irregularity was recorded successfully for voting place \"{placeName}\", \"{municipalityName}\". Total irregularities at this place: {count}.",
+        "signalNepPhotoRequiredReply": "The irregularity for voting place \"{placeName}\", \"{municipalityName}\" was not recorded. A photo must be sent with the Nep command.",
+        "signalZapQueryReply": "For voting place \"{placeName}\", \"{municipalityName}\": {message}",
+        "signalZapAcceptedReply": "The voting record for voting place \"{placeName}\", \"{municipalityName}\" was recorded successfully.",
+        "signalZapPhotoRequiredReply": "The Zap command for voting place \"{placeName}\", \"{municipalityName}\" requires an attached photo.",
+        "signalZapStatusRequiredReply": "For voting place \"{placeName}\", \"{municipalityName}\", first change the status to Zap with: Sta: Zap.",
+        "signalNotRegisteredReply": "To accept your request you must first register!",
+        "signalStatusZeroReply": "To accept your request, please change your status first!",
+        "signalHelpReply": "Available commands: {commands}",
+        "signalHelpDetailReply": "Command: {name}\nDescription: {description}\nFormat: {format}\nExample: {example}",
+        "signalHelpUnknownCommand": "Unknown command: {name}. Send '?:' for the list of available commands.",
+        "signalCommandHelp": {
+          "Reg": {
+            "description": "Registers a controller for a specific voting place by its numeric id.",
+            "format": "Reg: N.N.N.N",
+            "example": "Reg: 1.7.1.76"
+          },
+          "Izl": {
+            "description": "Queries or updates turnout for the sender's voting place. 'Izl:' queries the state, 'Izl: N' or 'Izl: N.' sets turnout, 'Izl: .M' sets home turnout, and 'Izl: N.M' sets both.",
+            "format": "Izl: [N[.M]]",
+            "example": "Izl: 35.4"
+          },
+          "Sta": {
+            "description": "Sets the senderStatus for the sender's voting place.",
+            "format": "Sta: <Akt|Gls|Prk|Bro|Prl|Zap>",
+            "example": "Sta: Akt"
+          },
+          "Rez": {
+            "description": "Updates candidateVotes for one or more candidates. Each pair is N.M where N is candidate id and M is the vote count.",
+            "format": "Rez: N.M [N.M ...]",
+            "example": "Rez: 1.20 2.30 3.45"
+          },
+          "Nep": {
+            "description": "Reports an irregularity with a short explanation and an attached photo.",
+            "format": "Nep: <short explanation> + photo",
+            "example": "Nep: Damaged ballot paper"
+          },
+          "?": {
+            "description": "Lists the available commands, or details about a specific command.",
+            "format": "?: [<command>]",
+            "example": "?: Izl"
+          }
+        },
+        "debugInProgressTab": "Raw Messages",
+        "debugMessageTab": "Message",
+        "debugIrregularitiesTab": "Irregularities",
+        "irregularitiesDate": "Date",
+        "irregularitiesTime": "Time",
+        "irregularitiesSender": "Sender",
+        "irregularitiesPlace": "Voting place",
+        "irregularitiesExplanation": "Explanation",
+        "irregularitiesPhoto": "Photo",
+        "irregularitiesEmpty": "No irregularities reported.",
+        "irregularitiesTreeTitle": "Voting places",
+        "irregularitiesAll": "All voting places",
+        "irregularitiesPreview": "Preview",
+        "irregularitiesPreviewTitle": "Voting irregularity incident report",
+        "irregularitiesFile": "File",
+        "irregularitiesSave": "Save",
+        "irregularitiesSaveAs": "Save as",
+        "irregularitiesRegion": "Region",
+        "irregularitiesMunicipality": "Municipality",
+        "irregularitiesDateTime": "Date and time",
+        "irregularitiesIncidentStatement": "This is a voting irregularity incident report.",
+        "zapRecordsEmpty": "No voting records reported.",
+        "zapPhoto": "Photo",
+        "zapPreviewTitle": "Polling station voting record",
+        "zapPreviewStatement": "This is a polling station voting record.",
+        "debugDatabaseTab": "Data Base",
+        "dbClearDataBtn": "Clear Data",
+        "dbClearRawMessagesLabel": "Delete All Raw Messages",
+        "dbClearRawMessagesConfirm": "Delete all raw messages? This cannot be undone.",
+        "dbClearRawMessagesSuccess": "Raw messages deleted: {count}.",
+        "dbClearRawMessagesFailed": "Failed to delete raw messages.",
+        "dbClearSender": "Clear Sender",
+        "dbClearStatus": "Clear Status",
+        "dbClearTurnout": "Clear TurnoutVotes",
+        "dbClearResults": "Clear Results",
+        "dbClearCorrection": "Clear Correction",
+        "dbClearIrregularities": "Delete All Irregularities",
+        "dbClearIrregularitiesConfirm": "Delete all irregularities? This cannot be undone.",
+        "dbClearZapRecords": "Delete All Polling Station Records",
+        "dbClearZapRecordsConfirm": "Delete all polling station records? This cannot be undone.",
+        "dbClearNoneSelected": "Select at least one option.",
+        "dbClearSuccess": "Data cleared successfully.",
+        "dbClearFailed": "Failed: ",
+        "debugTotalAcceptedMessages": "Total accepted messages:",
+        "debugSubmitTestMessageTitle": "Submit test message",
+        "debugSendToLocalBackendBtn": "Send to local backend",
+        "debugRecentMessagesTitle": "Recent messages",
+        "debugTableWhen": "When",
+        "debugTableSender": "Sender",
+        "debugTableRegion": "Region",
+        "debugTablePlace": "Place",
+        "debugTableType": "Type",
+        "debugDeleteSelectedMessagesBtn": "Delete selected messages",
+        "debugDeleteSelectedNone": "Select at least one message.",
+        "debugDeleteSelectedResult": "Deleted selected messages: {count}.",
+        "debugDeleteIncomingMessagesBtn": "Delete incoming messages",
+        "debugDeleteOutgoingMessagesBtn": "Delete outgoing messages",
+        "debugRawMessagesTitle": "Raw Signal bridge messages",
+        "debugRawDateHeader": "Date",
+        "debugRawTimeHeader": "Time",
+        "debugRawDirectionHeader": "Direction",
+        "debugRawPayloadHeader": "Raw payload",
+        "debugRawMessagesEmpty": "No raw Signal bridge messages.",
+        "debugDirectionIncoming": "incoming",
+        "debugDirectionOutgoing": "outgoing",
+        "debugDeleteResult": "Deleted {direction} messages: accepted={acceptedCount}, raw={rawCount}.",
+        "debugDeleteFailed": "Failed to delete messages.",
+        "electionPhaseTabs": {
+          "parliamentaryElections": "Parliamentary elections",
+          "presidentalElection": "Presidential election",
+          "localElections": "Local elections"
+        },
+        "parliamentaryPhaseSelector": {
+          "label": "Select parliamentary election phase",
+          "preparationPhase": "Preparation",
+          "electionDay": "Election Day",
+          "repeatedElections": "Repeated Election"
+        },
+        "parliamentaryPhaseTitles": {
+          "preparationPhase": "Parliamentary Elections 2026 - Preparation",
+          "electionDay": "Parliamentary Elections 2026 - Election Day",
+          "repeatedElections": "Parliamentary Elections 2026 - Repeated Election"
+        },
+        "localTitle": "Local Elections 2026",
+        "localPhaseSelector": {
+          "label": "Select local election phase",
+          "preparationPhase": "Preparation",
+          "electionDay": "Election Day",
+          "repeatedElections": "Repeated Election"
+        },
+        "localPhaseTitles": {
+          "preparationPhase": "Preparation",
+          "electionDay": "Election Day",
+          "repeatedElections": "Repeated Election"
+        },
+        "presidentalPhaseSelector": {
+          "label": "Select presidential election phase",
+          "preparation": "Preparation",
+          "firstRoundElectionDay": "First round - election day",
+          "firstroundRepededElections": "First round - repeated elections",
+          "secondRoudelectionDay": "Second round - election day",
+          "secondRoundRepeetadelections": "Second round - repeated elections"
+        },
+        "presidentalTitle": "Presidential Elections 2026",
+        "presidentalPhaseTitles": {
+          "preparation": "Preparation",
+          "firstRoundElectionDay": "First Round",
+          "firstroundRepededElections": "First Round - Repeated Elections",
+          "secondRoudelectionDay": "Second Round",
+          "secondRoundRepeetadelections": "Second Round - Repeated Elections"
+        },
+        "noElectionSelected": "No election is selected",
+        "parliamentaryOnlyNotice": "This view is currently available only for parliamentary elections.",
+        "underConstruction": "Under Construction",
+        "stopwatchTitle": "Stopwatch",
+        "startButton": "Start",
+        "stopButton": "Stop",
+        "stopwatchRunning": "Running",
+        "stopwatchStopped": "Stopped",
+        "stopwatchDurationLabel": "Duration",
+        "stopwatchDescription": "Start and measure the duration of the election phase",
+        "signalRegAlreadyRegisteredReply": "Registration has not been accepted, you are already registered for voting place {location}.",
+        "signalRegPlaceTakenReply": "Registration for {location} is not accepted, another controller is already registered for this voting place.",
+        "stopwatchDateLabel": "Date",
+        "tableControllerActivity": "Controller Activity",
+        "controllerStatus0": "Not Covered",
+        "controllerStatus1": "Registered",
+        "controllerStatus2": "Voting in Progress",
+        "controllerStatus3": "Voting Breaked",
+        "controllerStatus4": "Counting Votes",
+        "controllerStatus5": "Preliminary Results Ready",
+        "controllerStatus6": "Minutes Signed"
+      },
+      "navigation": [
+        {
+          "id": "izlaznost",
+          "label": "Turnout"
+        },
+        {
+          "id": "rezultati",
+          "label": "Election Results"
+        },
+        {
+          "id": "irregularities",
+          "label": "Irregularities"
+        },
+        {
+          "id": "zap-records",
+          "label": "Voting Records"
+        },
+        {
+          "id": "debug",
+          "label": "Tools"
+        },
+        {
+          "id": "language",
+          "label": "Language"
+        }
+      ],
+      "debugTabs": {
+        "main": "Debug",
+        "settings": "Settings"
+      },
+      "languageSelector": {
+        "label": "Language",
+        "options": {
+          "sr": "Serbian",
+          "en": "English"
+        }
+      }
+    }
+  }
+}

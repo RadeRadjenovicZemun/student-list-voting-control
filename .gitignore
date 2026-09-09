@@ -4,7 +4,10 @@ node_modules/
 .venv-*/
 
 # Local election data and generated scraper output
-data/
+data/*
+# Exceptions: these are required for the app to function, not generated/runtime data
+!data/multilang.json
+!data/templates.json
 
 # Runtime, temporary, and backup files
 *.tmp
