@@ -514,6 +514,23 @@ function saveIrregularities(records) {
   fs.writeFileSync(IRREGULARITIES_PATH, JSON.stringify(records, null, 2), 'utf8');
 }
 
+function normalizeIrregularityCategory(value, max) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 && number <= max ? number : 0;
+}
+
+function parseIrregularityCommandFields(rawExplanation) {
+  const raw = String(rawExplanation || '').trim();
+  const match = /^(\d+)[\s,.;]+(\d+)[\s,.;]+(\d+)\s+([\s\S]+)$/.exec(raw);
+  if (!match) return { explanation: raw, urgency: 0, violation: 0, severity: 0 };
+  return {
+    urgency: normalizeIrregularityCategory(match[1], 3),
+    violation: normalizeIrregularityCategory(match[2], 4),
+    severity: normalizeIrregularityCategory(match[3], 3),
+    explanation: String(match[4] || '').trim()
+  };
+}
+
 function loadZapRecords() {
   try {
     if (!fs.existsSync(ZAP_RECORDS_PATH)) fs.writeFileSync(ZAP_RECORDS_PATH, '[]', 'utf8');
@@ -615,7 +632,7 @@ function storeIrregularityAttachments(recordId, attachments) {
   });
 }
 
-function addIrregularity({ sender, explanation, attachments, senderNumber, groupId, groupName, region, municipality, place }) {
+function addIrregularity({ sender, explanation, urgency, violation, severity, attachments, senderNumber, groupId, groupName, region, municipality, place }) {
   const id = crypto.randomBytes(8).toString('hex') + '-' + Date.now();
   const records = loadIrregularities();
   const record = {
@@ -623,6 +640,9 @@ function addIrregularity({ sender, explanation, attachments, senderNumber, group
     sender: sender || null,
     senderNumber: senderNumber || null,
     explanation: String(explanation || '').trim(),
+    urgency: normalizeIrregularityCategory(urgency, 3),
+    violation: normalizeIrregularityCategory(violation, 4),
+    severity: normalizeIrregularityCategory(severity, 3),
     region: region || null,
     municipality: municipality || null,
     place: place || null,
@@ -990,7 +1010,8 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
       const sameSender = sender && item.sender && String(item.sender).trim() === String(sender).trim();
       return sameNumber || sameSender;
     });
-    const explanation = String(matched.fields.explanation || '').trim();
+    const irregularityFields = parseIrregularityCommandFields(matched.fields.explanation);
+    const explanation = irregularityFields.explanation;
     if (!explanation) {
       const replyText = getI18nUiString('sr', 'signalNepCountReply', 'За бирачко место "{placeName}", "{municipalityName}", евидентирано је неправилности: {count}.');
       const formattedReply = fillTemplate(replyText, {
@@ -1024,7 +1045,10 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
     const irregularity = addIrregularity({
       sender,
       senderNumber,
-      explanation: matched.fields.explanation,
+      explanation: irregularityFields.explanation,
+      urgency: irregularityFields.urgency,
+      violation: irregularityFields.violation,
+      severity: irregularityFields.severity,
       attachments: imageAttachments,
       groupId,
       groupName,
@@ -2268,6 +2292,20 @@ app.get('/api/irregularities', async (req, res) => {
   res.json(records.slice().sort((a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0)));
 });
 
+app.patch('/api/irregularities/:id', (req, res) => {
+  const records = loadIrregularities();
+  const record = records.find((item) => String(item.id) === String(req.params.id));
+  if (!record) return res.status(404).json({ ok: false, error: 'irregularity-not-found' });
+  if (typeof req.body?.explanation !== 'string') return res.status(400).json({ ok: false, error: 'invalid-explanation' });
+  record.explanation = req.body.explanation;
+  record.urgency = normalizeIrregularityCategory(req.body.urgency, 3);
+  record.violation = normalizeIrregularityCategory(req.body.violation, 4);
+  record.severity = normalizeIrregularityCategory(req.body.severity, 3);
+  record.editedAt = new Date().toISOString();
+  saveIrregularities(records);
+  res.json({ ok: true, record });
+});
+
 app.get('/api/irregularities/:id/attachments/:index', (req, res) => {
   const record = loadIrregularities().find((item) => String(item.id) === String(req.params.id));
   const attachment = record && record.attachments && record.attachments[Number(req.params.index)];
@@ -2291,6 +2329,21 @@ app.delete('/api/irregularities', (req, res) => {
 
 app.get('/api/zap-records', (req, res) => {
   res.json(loadZapRecords().slice().sort((a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0)));
+});
+
+app.patch('/api/zap-records/:id', (req, res) => {
+  const records = loadZapRecords();
+  const record = records.find((item) => String(item.id) === String(req.params.id));
+  if (!record) return res.status(404).json({ ok: false, error: 'zap-record-not-found' });
+
+  if (req.body && typeof req.body.region !== 'undefined') record.region = String(req.body.region || '');
+  if (req.body && typeof req.body.municipality !== 'undefined') record.municipality = String(req.body.municipality || '');
+  if (req.body && typeof req.body.place !== 'undefined') record.place = String(req.body.place || '');
+  if (req.body && typeof req.body.receivedAt !== 'undefined') record.receivedAt = String(req.body.receivedAt || new Date().toISOString());
+  record.editedAt = new Date().toISOString();
+
+  saveZapRecords(records);
+  res.json({ ok: true, record });
 });
 
 app.delete('/api/zap-records', (req, res) => {

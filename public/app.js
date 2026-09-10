@@ -55,6 +55,89 @@
         return (multi[lang] && multi[lang].ui) || (multi.sr && multi.sr.ui) || (multi.en && multi.en.ui) || {};
       }
 
+      const IRREGULARITY_CATEGORY_OPTIONS = {
+        urgency: [
+          { value: 1, key: 'irregularitiesUrgencyUrgent', fallback: 'Urgent' },
+          { value: 2, key: 'irregularitiesUrgencyPrioritize', fallback: 'Prioritize' },
+          { value: 3, key: 'irregularitiesUrgencyNormal', fallback: 'Normal' }
+        ],
+        violation: [
+          { value: 1, key: 'irregularitiesViolationMisdemeanor', fallback: 'Misdemeanor' },
+          { value: 2, key: 'irregularitiesViolationElectoralLaw', fallback: 'Violation of electoral law' },
+          { value: 3, key: 'irregularitiesViolationVotingRights', fallback: 'Violation of voting rights' },
+          { value: 4, key: 'irregularitiesViolationPhysicalViolence', fallback: 'Physical violence' }
+        ],
+        severity: [
+          { value: 1, key: 'irregularitiesSeverityCritical', fallback: 'Critical' },
+          { value: 2, key: 'irregularitiesSeverityMajor', fallback: 'Major' },
+          { value: 3, key: 'irregularitiesSeverityMinor', fallback: 'Minor' }
+        ]
+      };
+
+      const IRREGULARITY_CATEGORY_LABELS = {
+        urgency: { key: 'irregularitiesUrgency', fallback: 'Urgency' },
+        violation: { key: 'irregularitiesViolation', fallback: 'Violation' },
+        severity: { key: 'irregularitiesSeverity', fallback: 'Severity' }
+      };
+
+      function normalizeIrregularityCategory(category, value) {
+        const number = Number(value);
+        const options = IRREGULARITY_CATEGORY_OPTIONS[category] || [];
+        return options.some((option) => option.value === number) ? number : 0;
+      }
+
+      function getIrregularityCategoryText(category, value, locale = getLocaleDictionary()) {
+        const number = normalizeIrregularityCategory(category, value);
+        const option = (IRREGULARITY_CATEGORY_OPTIONS[category] || []).find((item) => item.value === number);
+        return option ? (locale[option.key] || option.fallback) : '';
+      }
+
+      function getIrregularityCategoryLabel(category, locale = getLocaleDictionary()) {
+        const label = IRREGULARITY_CATEGORY_LABELS[category];
+        return label ? (locale[label.key] || label.fallback) : category;
+      }
+
+      function renderIrregularityCategorySummary(source, locale = getLocaleDictionary()) {
+        return ['urgency', 'violation', 'severity'].map((category) => {
+          const text = getIrregularityCategoryText(category, source && source[category], locale);
+          if (!text) return '';
+          return `<div>${escapeHtml(text)}</div>`;
+        }).join('');
+      }
+
+      function updateIrregularityCategorySummary() {
+        const documentEl = document.getElementById('irregularityPreviewDocument');
+        const summary = documentEl?.querySelector('.category-summary');
+        if (!documentEl || !summary) return;
+        summary.innerHTML = renderIrregularityCategorySummary({
+          urgency: documentEl.dataset.urgency,
+          violation: documentEl.dataset.violation,
+          severity: documentEl.dataset.severity
+        });
+      }
+
+      function populateIrregularityCategoryControls() {
+        const locale = getLocaleDictionary();
+        ['urgency', 'violation', 'severity'].forEach((category) => {
+          const select = document.getElementById(`irregularityPreview${category[0].toUpperCase()}${category.slice(1)}Select`);
+          if (!select) return;
+          const currentValue = select.value || '0';
+          select.innerHTML = `<option value="0">${escapeHtml(getIrregularityCategoryLabel(category, locale))}</option>${(IRREGULARITY_CATEGORY_OPTIONS[category] || []).map((option) => `<option value="${option.value}">${escapeHtml(locale[option.key] || option.fallback)}</option>`).join('')}`;
+          select.value = currentValue;
+        });
+      }
+
+      function setIrregularityCategoryControls(record) {
+        ['urgency', 'violation', 'severity'].forEach((category) => {
+          const value = String(normalizeIrregularityCategory(category, record && record[category]));
+          const select = document.getElementById(`irregularityPreview${category[0].toUpperCase()}${category.slice(1)}Select`);
+          if (select) select.value = value;
+          const documentEl = document.getElementById('irregularityPreviewDocument');
+          if (documentEl) documentEl.dataset[category] = value;
+        });
+        updateIrregularityCategorySummary();
+      }
+
       function setIrregularitiesActionsVisibility(panel) {
         const actions = document.getElementById('irregularitiesActions');
         if (actions) actions.hidden = panel !== 'irregularities' && panel !== 'zap-records';
@@ -81,7 +164,8 @@
         const previewSave = document.getElementById('irregularityPreviewSaveBtn');
         if (previewSave) previewSave.textContent = locale.irregularitiesSave || 'Save';
         const previewSaveAs = document.getElementById('irregularityPreviewSaveAsBtn');
-        if (previewSaveAs) previewSaveAs.textContent = locale.irregularitiesSaveAs || 'Save as';
+        if (previewSaveAs) previewSaveAs.textContent = locale.irregularitiesSaveAs || 'Print PDF';
+        populateIrregularityCategoryControls();
         const irregularitiesTreeTitle = document.getElementById('irregularitiesTreeTitle');
         if (irregularitiesTreeTitle) irregularitiesTreeTitle.textContent = locale.irregularitiesTreeTitle || 'Voting places';
         const timeLabel = document.querySelector('.time-label');
@@ -1908,6 +1992,7 @@
         if (!container) return;
         const locale = getLocaleDictionary();
         container.innerHTML = '';
+        globalThis.cleanupTurnoutTableViewport?.();
         const regions = getRegions(config);
 
         // build table
@@ -2033,12 +2118,108 @@
 
         table.appendChild(tbody);
 
-        // add a small header control for collapsing the whole table (Pregled)
+        const tableScroll = document.createElement('div');
+        tableScroll.className = 'results-table-scroll';
+        tableScroll.appendChild(table);
+
+        const stickyHeaderViewport = document.createElement('div');
+        stickyHeaderViewport.className = 'results-sticky-header-viewport';
+        const stickyHeaderTable = document.createElement('table');
+        stickyHeaderTable.className = 'regions-table results-sticky-header-table';
+        stickyHeaderTable.innerHTML = thead.outerHTML;
+        stickyHeaderTable.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+        thead.style.visibility = 'hidden';
+        stickyHeaderViewport.appendChild(stickyHeaderTable);
+
         const headerDiv = el('div');
         headerDiv.className = 'table-header';
         headerDiv.innerHTML = `<button id="pregledBtn" class="collapse-btn" data-expanded="1">▼</button> <strong id="regionsSummaryTitle">${locale.regionSummaryTitle || 'Pregled'}</strong>`;
         container.appendChild(headerDiv);
-        container.appendChild(table);
+        container.appendChild(stickyHeaderViewport);
+        container.appendChild(tableScroll);
+
+        const syncStickyHeaderMetrics = () => {
+          stickyHeaderTable.style.width = `${table.getBoundingClientRect().width}px`;
+          stickyHeaderTable.style.transform = `translateX(${-tableScroll.scrollLeft}px)`;
+          stickyHeaderTable.querySelectorAll('th').forEach((headerCell, index) => {
+            const sourceCell = thead.querySelectorAll('th')[index];
+            if (sourceCell) headerCell.style.width = `${sourceCell.getBoundingClientRect().width}px`;
+          });
+        };
+        syncStickyHeaderMetrics();
+
+        const bottomScrollbar = document.createElement('div');
+        bottomScrollbar.id = 'turnoutBottomScrollbar';
+        bottomScrollbar.className = 'results-bottom-scrollbar';
+        bottomScrollbar.innerHTML = '<div class="results-bottom-scrollbar-content"></div>';
+        document.body.appendChild(bottomScrollbar);
+        const bottomScrollbarContent = bottomScrollbar.firstElementChild;
+        const mainScrollContainer = document.querySelector('.main');
+        let syncingBottomScrollbar = false;
+        const syncBottomScrollbarMetrics = () => {
+          const rect = container.getBoundingClientRect();
+          bottomScrollbar.style.left = `${Math.max(0, rect.left)}px`;
+          bottomScrollbar.style.width = `${Math.max(0, window.innerWidth - Math.max(0, rect.left))}px`;
+          const contentWidth = Math.max(tableScroll.scrollWidth, table.scrollWidth);
+          bottomScrollbarContent.style.width = `${contentWidth}px`;
+          bottomScrollbar.style.display = contentWidth > tableScroll.clientWidth ? 'block' : 'none';
+          bottomScrollbar.scrollLeft = tableScroll.scrollLeft;
+        };
+        bottomScrollbar.addEventListener('scroll', () => {
+          if (syncingBottomScrollbar) return;
+          syncingBottomScrollbar = true;
+          tableScroll.scrollLeft = bottomScrollbar.scrollLeft;
+          syncingBottomScrollbar = false;
+        });
+        tableScroll.addEventListener('scroll', () => {
+          if (syncingBottomScrollbar) return;
+          syncingBottomScrollbar = true;
+          bottomScrollbar.scrollLeft = tableScroll.scrollLeft;
+          syncingBottomScrollbar = false;
+          syncStickyHeaderMetrics();
+        });
+        const updateTurnoutTableStickyOffset = () => {
+          const banner = document.querySelector('.page-banner');
+          const bannerBottom = banner ? Math.max(0, banner.getBoundingClientRect().bottom) : 0;
+          stickyHeaderViewport.style.setProperty('--results-table-sticky-top', `${bannerBottom}px`);
+          const tableRect = tableScroll.getBoundingClientRect();
+          const headerHeight = stickyHeaderViewport.offsetHeight;
+          const shouldPin = tableRect.top <= bannerBottom && tableRect.bottom > bannerBottom + headerHeight;
+          stickyHeaderViewport.classList.toggle('is-pinned', shouldPin);
+          if (shouldPin) {
+            stickyHeaderViewport.style.left = `${tableRect.left}px`;
+            stickyHeaderViewport.style.width = `${tableScroll.clientWidth}px`;
+          } else {
+            stickyHeaderViewport.style.left = '';
+            stickyHeaderViewport.style.width = '';
+          }
+          syncStickyHeaderMetrics();
+          syncBottomScrollbarMetrics();
+        };
+        const turnoutTableResizeObserver = typeof ResizeObserver === 'function'
+          ? new ResizeObserver(() => {
+            syncBottomScrollbarMetrics();
+            syncStickyHeaderMetrics();
+          })
+          : null;
+        turnoutTableResizeObserver?.observe(container);
+        turnoutTableResizeObserver?.observe(table);
+        turnoutTableResizeObserver?.observe(stickyHeaderTable);
+        turnoutTableResizeObserver?.observe(stickyHeaderViewport);
+        globalThis.cleanupTurnoutTableViewport = () => {
+          window.removeEventListener('resize', updateTurnoutTableStickyOffset);
+          window.removeEventListener('scroll', updateTurnoutTableStickyOffset);
+          mainScrollContainer?.removeEventListener('scroll', updateTurnoutTableStickyOffset);
+          turnoutTableResizeObserver?.disconnect();
+          bottomScrollbar.remove();
+          if (globalThis.cleanupTurnoutTableViewport) {
+            delete globalThis.cleanupTurnoutTableViewport;
+          }
+        };
+        window.addEventListener('resize', updateTurnoutTableStickyOffset);
+        window.addEventListener('scroll', updateTurnoutTableStickyOffset, { passive: true });
+        mainScrollContainer?.addEventListener('scroll', updateTurnoutTableStickyOffset, { passive: true });
+        updateTurnoutTableStickyOffset();
 
         // collapse/expand the entire table body when Pregled is toggled
         (function attachPregled() {
@@ -2584,14 +2765,11 @@
         updateParliamentaryViewVisibility();
         if (!showParliamentary) return;
 
-        let configChangedWhileRunning = false;
-        if (stopwatchRunning) {
-          configChangedWhileRunning = await refreshConfigFromVersionIfChanged();
-          if (configChangedWhileRunning && cachedConfig) {
-            const statuses = Array.isArray(cachedConfig.senderStatuses) ? cachedConfig.senderStatuses : [];
-            const regions = getRegions(cachedConfig);
-            captureCoverageTimelineSnapshotFromConfig(statuses, regions);
-          }
+        const configChangedWhileRunning = await refreshConfigFromVersionIfChanged();
+        if (configChangedWhileRunning && stopwatchRunning && cachedConfig) {
+          const statuses = Array.isArray(cachedConfig.senderStatuses) ? cachedConfig.senderStatuses : [];
+          const regions = getRegions(cachedConfig);
+          captureCoverageTimelineSnapshotFromConfig(statuses, regions);
         }
 
         globalThis.loadResultsSummary = async function loadResultsSummary() {
@@ -3487,6 +3665,58 @@
         if (button) button.disabled = !selectedIrregularityId;
       }
 
+      function setupPreviewPhotoFrame(documentEl, reflowElement) {
+        const photoFrame = documentEl?.querySelector('.photo-frame');
+        const photo = photoFrame?.querySelector('.photo');
+        if (!documentEl || !photoFrame || !photo) return;
+        let photoRatio = 1;
+        let photoWidth = 0;
+        const getPhotoLimits = () => {
+          const documentStyle = getComputedStyle(documentEl);
+          const documentRect = documentEl.getBoundingClientRect();
+          const frameRect = photoFrame.getBoundingClientRect();
+          const contentWidth = documentEl.clientWidth - parseFloat(documentStyle.paddingLeft) - parseFloat(documentStyle.paddingRight);
+          const frameOffsetFromTop = frameRect.top - documentRect.top;
+          const availableHeight = Math.max(80, documentEl.clientHeight - frameOffsetFromTop - parseFloat(documentStyle.paddingBottom) - 12);
+          return { maxWidth: Math.max(80, contentWidth), maxHeight: Math.max(80, availableHeight) };
+        };
+        const fitPhotoToPage = () => {
+          const limits = getPhotoLimits();
+          const naturalWidth = photo.naturalWidth || photo.offsetWidth;
+          const naturalHeight = photo.naturalHeight || photo.offsetHeight;
+          if (!naturalWidth || !naturalHeight) return;
+          photoRatio = naturalWidth / naturalHeight;
+          const maxWidthFromHeight = limits.maxHeight * photoRatio;
+          const maximumWidth = Math.min(limits.maxWidth, maxWidthFromHeight);
+          photoWidth = Math.min(photoWidth || maximumWidth, maximumWidth);
+          photoFrame.style.width = `${photoWidth}px`;
+          photo.style.maxHeight = `${limits.maxHeight}px`;
+          photo.style.maxWidth = `${limits.maxWidth}px`;
+        };
+        const resizePhoto = (event) => {
+          event.preventDefault();
+          const startX = event.clientX;
+          const startWidth = photoFrame.getBoundingClientRect().width;
+          const limits = getPhotoLimits();
+          const onMove = (moveEvent) => {
+            const width = Math.min(limits.maxWidth, limits.maxHeight * photoRatio, Math.max(80, startWidth + moveEvent.clientX - startX));
+            photoWidth = width;
+            photoFrame.style.width = `${width}px`;
+          };
+          const onEnd = () => {
+            document.removeEventListener('pointermove', onMove);
+            document.removeEventListener('pointerup', onEnd);
+          };
+          document.addEventListener('pointermove', onMove);
+          document.addEventListener('pointerup', onEnd, { once: true });
+        };
+        photo.addEventListener('load', fitPhotoToPage);
+        if (photo.complete) fitPhotoToPage();
+        photoFrame.querySelector('.photo-resize-handle')?.addEventListener('pointerdown', resizePhoto);
+        reflowElement?.addEventListener('input', fitPhotoToPage);
+        window.addEventListener('resize', fitPhotoToPage, { once: true });
+      }
+
       function setupIrregularitySelection() {
         const tbody = document.getElementById('irregularitiesBody');
         const preview = document.getElementById('irregularityPreviewBtn');
@@ -3517,8 +3747,19 @@
         const modal = document.getElementById('irregularityPreviewModal');
         const documentEl = document.getElementById('irregularityPreviewDocument');
         if (modal && documentEl) {
+          documentEl.classList.remove('zap-preview-document');
           documentEl.dataset.defaultFilename = defaultName;
-          documentEl.innerHTML = `<h2>${escapeHtml(locale.irregularitiesPreviewTitle || 'Voting irregularity incident report')}</h2><section class="location"><div><strong>${escapeHtml(locale.irregularitiesRegion || 'Region')}</strong>${escapeHtml(record.region || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesMunicipality || 'Municipality')}</strong>${escapeHtml(record.municipality || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesPlace || 'Voting place')}</strong>${escapeHtml(record.place || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesDateTime || 'Date and time')}</strong>${escapeHtml(dateText)}</div></section><div class="statement">${escapeHtml(locale.irregularitiesIncidentStatement || 'This is a voting irregularity incident report.')}</div><div class="description">${escapeHtml(record.explanation || '')}</div>${imageUrl ? `<img class="photo" src="${imageUrl}" alt="${escapeHtml(locale.irregularitiesPhoto || 'Photo')}">` : ''}`;
+          documentEl.dataset.previewType = 'irregularity';
+          documentEl.dataset.recordId = String(record.id);
+          documentEl.dataset.urgency = String(normalizeIrregularityCategory('urgency', record.urgency));
+          documentEl.dataset.violation = String(normalizeIrregularityCategory('violation', record.violation));
+          documentEl.dataset.severity = String(normalizeIrregularityCategory('severity', record.severity));
+          document.querySelectorAll('.irregularity-preview-category-select').forEach((select) => { select.hidden = false; });
+          const institutionText = locale.irregularitiesInstitution || 'Републичка изборна комисија\nКраља Милана 14\n11000 Београд, Србија';
+          documentEl.innerHTML = `<div class="category-summary">${renderIrregularityCategorySummary(record, locale)}</div><div class="report-institution">${escapeHtml(institutionText)}</div><div class="subject"><strong>${escapeHtml(locale.irregularitiesSubject || 'Subject:')}</strong> ${escapeHtml(locale.irregularitiesSubjectText || 'Report of an irregularity at a polling station.')}</div><section class="location"><div><strong>${escapeHtml(locale.irregularitiesRegion || 'Region')}:</strong> ${escapeHtml(record.region || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesMunicipality || 'Municipality')}:</strong> ${escapeHtml(record.municipality || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesPlace || 'Voting place')}:</strong> ${escapeHtml(record.place || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesDateTime || 'Date and time')}:</strong> ${escapeHtml(dateText)}</div></section><div class="description-label">${escapeHtml(locale.irregularitiesDescriptionHeading || 'Irregularity description:')}</div><div class="description" contenteditable="true" role="textbox" aria-multiline="true">${escapeHtml(record.explanation || '')}</div>${imageUrl ? `<div class="photo-frame"><img class="photo" src="${imageUrl}" alt="${escapeHtml(locale.irregularitiesPhoto || 'Photo')}"><button class="photo-resize-handle" type="button" aria-label="Resize photo" title="Resize photo"></button></div>` : ''}`;
+          setIrregularityCategoryControls(record);
+          const description = documentEl.querySelector('.description');
+          setupPreviewPhotoFrame(documentEl, description);
           modal.hidden = false;
           document.body.classList.add('irregularity-modal-open');
           documentEl.scrollTop = 0;
@@ -3561,8 +3802,83 @@
             document.title = previousTitle;
           }, 500);
         };
-        document.getElementById('irregularityPreviewSaveBtn')?.addEventListener('click', printReport);
+        const saveReport = async () => {
+          const menu = document.getElementById('irregularityPreviewFileMenu');
+          if (menu) menu.hidden = true;
+          const documentEl = document.getElementById('irregularityPreviewDocument');
+          if (!documentEl) return;
+          const recordId = documentEl.dataset.recordId;
+          const previewType = documentEl.dataset.previewType;
+          const saveButton = document.getElementById('irregularityPreviewSaveBtn');
+          const locale = getLocaleDictionary();
+          const originalText = saveButton?.textContent || locale.irregularitiesSave || 'Save';
+          if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.textContent = locale.irregularitiesSaving || 'Saving...';
+          }
+          try {
+            if (previewType === 'zap') {
+              const record = zapRecords.find((row) => String(row.id) === String(recordId || selectedZapRecordId));
+              if (!record || !recordId) throw new Error('zap-record-not-found');
+              const response = await fetch(`/api/zap-records/${encodeURIComponent(recordId)}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  region: record.region,
+                  municipality: record.municipality,
+                  place: record.place,
+                  receivedAt: record.receivedAt
+                })
+              });
+              if (!response.ok) throw new Error(`Save failed: ${response.status}`);
+              const payload = await response.json();
+              const index = zapRecords.findIndex((row) => String(row.id) === String(recordId));
+              if (index >= 0) zapRecords[index] = payload.record;
+              renderZapRecords();
+              if (saveButton) saveButton.textContent = locale.irregularitiesSaved || 'Saved';
+              return;
+            }
+
+            const description = documentEl.querySelector('.description');
+            if (!description || !recordId || previewType !== 'irregularity') return;
+            const response = await fetch(`/api/irregularities/${encodeURIComponent(recordId)}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                explanation: description.innerText.replace(/\u00a0/g, ' ').trim(),
+                urgency: normalizeIrregularityCategory('urgency', documentEl.dataset.urgency),
+                violation: normalizeIrregularityCategory('violation', documentEl.dataset.violation),
+                severity: normalizeIrregularityCategory('severity', documentEl.dataset.severity)
+              })
+            });
+            if (!response.ok) throw new Error(`Save failed: ${response.status}`);
+            const payload = await response.json();
+            const index = irregularitiesRecords.findIndex((row) => String(row.id) === String(recordId));
+            if (index >= 0) irregularitiesRecords[index] = payload.record;
+            renderFilteredIrregularitiesTable();
+            if (saveButton) saveButton.textContent = locale.irregularitiesSaved || 'Saved';
+          } catch (error) {
+            if (saveButton) saveButton.textContent = locale.irregularitiesSaveFailed || 'Save failed';
+          } finally {
+            window.setTimeout(() => {
+              if (saveButton) {
+                saveButton.disabled = false;
+                saveButton.textContent = originalText;
+              }
+            }, 900);
+          }
+        };
+        document.getElementById('irregularityPreviewSaveBtn')?.addEventListener('click', saveReport);
         document.getElementById('irregularityPreviewSaveAsBtn')?.addEventListener('click', printReport);
+        ['urgency', 'violation', 'severity'].forEach((category) => {
+          const select = document.getElementById(`irregularityPreview${category[0].toUpperCase()}${category.slice(1)}Select`);
+          select?.addEventListener('change', () => {
+            const documentEl = document.getElementById('irregularityPreviewDocument');
+            if (!documentEl) return;
+            documentEl.dataset[category] = String(normalizeIrregularityCategory(category, select.value));
+            updateIrregularityCategorySummary();
+          });
+        });
         document.addEventListener('keydown', (event) => {
           if (event.key === 'Escape' && modal && !modal.hidden) close();
         });
@@ -3718,9 +4034,17 @@
         const documentEl = document.getElementById('irregularityPreviewDocument');
         const modal = document.getElementById('irregularityPreviewModal');
         if (!documentEl || !modal) return;
+        documentEl.classList.add('zap-preview-document');
         documentEl.dataset.defaultFilename = `${String(record.place || 'voting-record').replace(/[^\p{L}\p{N}_-]+/gu, '_')}_${date ? date.toISOString().replace(/[:.]/g, '-') : 'record'}.pdf`;
+        documentEl.dataset.previewType = 'zap';
+        documentEl.dataset.recordId = String(record.id);
+        ['urgency', 'violation', 'severity'].forEach((category) => { delete documentEl.dataset[category]; });
+        setIrregularityCategoryControls({ urgency: 0, violation: 0, severity: 0 });
+        document.querySelectorAll('.irregularity-preview-category-select').forEach((select) => { select.hidden = true; });
         const locale = getLocaleDictionary();
-        documentEl.innerHTML = `<h2>${escapeHtml(locale.zapPreviewTitle || 'Polling station voting record')}</h2><section class="location"><div><strong>${escapeHtml(locale.irregularitiesRegion || 'Region')}</strong>${escapeHtml(record.region || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesMunicipality || 'Municipality')}</strong>${escapeHtml(record.municipality || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesPlace || 'Voting place')}</strong>${escapeHtml(record.place || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesDateTime || 'Date and time')}</strong>${escapeHtml(date ? `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}` : '--')}</div></section><div class="statement">${escapeHtml(locale.zapPreviewStatement || 'This is a polling station voting record.')}</div>${imageUrl ? `<img class="photo" src="${imageUrl}" alt="${escapeHtml(locale.zapPhoto || 'Photo')}">` : ''}`;
+        const formattedDateTime = date ? `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}` : '--';
+        documentEl.innerHTML = `<div class="zap-header"><div class="zap-title-block"><h2>${escapeHtml(locale.zapPreviewTitle || 'Polling station voting record')}</h2><div class="zap-place"><strong>${escapeHtml(locale.irregularitiesPlace || 'Voting place')}:</strong> ${escapeHtml(record.place || '--')}</div></div><div class="zap-meta"><div><strong>${escapeHtml(locale.irregularitiesRegion || 'Region')}:</strong> ${escapeHtml(record.region || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesMunicipality || 'Municipality')}:</strong> ${escapeHtml(record.municipality || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesDateTime || 'Date and time')}:</strong> ${escapeHtml(formattedDateTime)}</div></div></div>${imageUrl ? `<div class="photo-frame"><img class="photo" src="${imageUrl}" alt="${escapeHtml(locale.zapPhoto || 'Photo')}"><button class="photo-resize-handle" type="button" aria-label="Resize photo" title="Resize photo"></button></div>` : ''}`;
+        setupPreviewPhotoFrame(documentEl);
         modal.hidden = false;
         document.body.classList.add('irregularity-modal-open');
         documentEl.scrollTop = 0;
