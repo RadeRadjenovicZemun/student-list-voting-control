@@ -157,6 +157,7 @@
             <div class="debug-tabs" role="tablist" aria-label="Debug tabs">
               <button type="button" class="debug-tab-btn active" data-debug-tab="debug-tab-settings" role="tab" aria-selected="true">Podesavanja</button>
               <button type="button" class="debug-tab-btn" data-debug-tab="debug-tab-main" role="tab" aria-selected="false">Debug</button>
+              <button type="button" class="debug-tab-btn" data-debug-tab="debug-tab-access-control" role="tab" aria-selected="false">Контрола приступа</button>
             </div>
 
             <div id="debug-tab-main" class="debug-tab-panel" role="tabpanel">
@@ -321,6 +322,22 @@
             </div>
           </div>
 
+            <div id="debug-tab-access-control" class="debug-tab-panel" role="tabpanel">
+              <section class="access-control-panel">
+                <h3 id="accessRequestsTitle">Захтеви за приступ</h3>
+                <table class="access-control-table">
+                  <thead><tr><th id="accessRequestsIpHeader">IP адреса</th><th id="accessRequestedAtHeader">Време захтева</th><th id="accessDeviceHeader">Уређај</th><th id="accessDecisionHeader">Одлука</th></tr></thead>
+                  <tbody id="accessRequestsBody"></tbody>
+                </table>
+                <h3 id="accessSessionsTitle">Активне сесије</h3>
+                <table class="access-control-table">
+                  <thead><tr><th id="accessSessionsIpHeader">IP адреса</th><th id="accessSessionDeviceHeader">Уређај</th><th id="accessApprovedAtHeader">Одобрено</th><th id="accessLastActivityHeader">Последња активност</th><th id="accessExpiresHeader">Истиче</th><th></th></tr></thead>
+                  <tbody id="accessSessionsBody"></tbody>
+                </table>
+                <div id="accessControlStatus" class="small" aria-live="polite"></div>
+              </section>
+            </div>
+
             <div id="debug-tab-settings" class="debug-tab-panel active" role="tabpanel">
               <div class="settings-tabs" role="tablist" aria-label="Settings tabs">
                 <button type="button" class="settings-tab-btn active" data-settings-tab="settings-tab-stopwatch" role="tab" aria-selected="true">Stopwatch</button>
@@ -344,9 +361,24 @@
                   <div id="signalDescription" class="stopwatch-explanation">Connects to Signal App group responsible for collecting election results and different statuses</div>
                   <div id="signalStatusBadge" class="signal-status disconnected">Checking...</div>
 
+                  <div class="signal-group-assignment" aria-label="Signal group assignments">
+                    <label class="signal-group-list-column">
+                      <span>Нераспоређене групе</span>
+                      <select id="signalUnassignedGroups" multiple size="7" aria-label="Нераспоређене групе"></select>
+                    </label>
+                    <div class="signal-group-assignment-actions">
+                      <button id="assignSignalGroupsBtn" type="button" title="Додели изабране групе" aria-label="Додели изабране групе">→</button>
+                      <button id="unassignSignalGroupsBtn" type="button" title="Уклони изабране групе" aria-label="Уклони изабране групе">←</button>
+                    </div>
+                    <label class="signal-group-list-column">
+                      <span>Додељене групе</span>
+                      <select id="signalAssignedGroups" multiple size="7" aria-label="Додељене групе"></select>
+                    </label>
+                  </div>
+
                   <div class="signal-controls">
                     <label>
-                      <span id="signalGroupLabel">Signal group</span>
+                      <span id="signalGroupLabel">Група за преглед порука</span>
                       <select id="signalGroupSelect"></select>
                     </label>
                   </div>
@@ -458,6 +490,10 @@
                       <span id="parliamentaryPhaseElectionDayLabel">Election Day</span>
                     </label>
                     <label class="parliamentary-phase-option">
+                      <input type="checkbox" name="parliamentary-phase" data-parliamentary-phase="postElection" />
+                      <span id="parliamentaryPhasePostElectionLabel">Post Election</span>
+                    </label>
+                    <label class="parliamentary-phase-option">
                       <input type="checkbox" name="parliamentary-phase" data-parliamentary-phase="repeatedElections" />
                       <span id="parliamentaryPhaseRepeatedLabel">Repeated Election</span>
                     </label>
@@ -522,14 +558,32 @@
             <button id="irregularityPreviewFileBtn" type="button">File</button>
             <div id="irregularityPreviewFileMenu" class="irregularity-preview-file-menu" hidden>
               <button id="irregularityPreviewSaveBtn" type="button">Save</button>
-              <button id="irregularityPreviewSaveAsBtn" type="button">Save as</button>
+              <button id="irregularityPreviewSaveAsBtn" type="button">Print PDF</button>
             </div>
           </div>
+          <select id="irregularityPreviewUrgencySelect" class="irregularity-preview-category-select" aria-label="Urgency"></select>
+          <select id="irregularityPreviewViolationSelect" class="irregularity-preview-category-select" aria-label="Violation"></select>
+          <select id="irregularityPreviewSeveritySelect" class="irregularity-preview-category-select" aria-label="Severity"></select>
           <button id="irregularityPreviewCloseBtn" class="irregularity-preview-close" type="button" aria-label="Close preview">X</button>
         </header>
         <article id="irregularityPreviewDocument" class="irregularity-preview-document"></article>
       </section>
     </div>
+
+    <dialog id="accessRequestDialog" class="access-request-dialog">
+      <h2 id="accessRequestDialogTitle">Нови захтев за приступ</h2>
+      <p id="accessRequestDialogDetails"></p>
+      <div id="accessRequestDecisionActions" class="access-dialog-actions">
+        <button id="accessDialogRejectBtn" class="secondary" type="button">Одбиј</button>
+        <button id="accessDialogApproveBtn" type="button">Одобри</button>
+      </div>
+      <div id="accessApprovalCodePanel" hidden>
+        <p id="accessApprovalCodeLabel">Доставите овај једнократни код кориснику:</p>
+        <output id="accessApprovalCode"></output>
+        <p id="accessApprovalExpiry" class="small"></p>
+        <button id="accessDialogCloseBtn" type="button">Затвори</button>
+      </div>
+    </dialog>
 
     <script src="app.js"></script>
   </body>

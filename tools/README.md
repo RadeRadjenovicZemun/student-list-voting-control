@@ -168,3 +168,55 @@ python3 tools/fetch_rik.py --output-dir data --full-import --checkpoints --inter
 ```
 
 After the data is collected, use the assembled output as needed by the app or for later resumption.
+
+## Check and stop a residual dashboard server
+
+The dashboard is started from the repository root with `npm start` and normally
+uses port `3000`. Before restarting it, check whether an old `server.js`
+process is still running:
+
+```bash
+cd /home/rade/VSC/First
+pgrep -af 'node server.js'
+ss -ltnp | grep ':3000'
+```
+
+If either command reports a process, inspect its PID before stopping it. The
+first column in the `pgrep` output is the PID; `ss` may show it as `pid=...`:
+
+```bash
+ps -fp <PID>
+readlink -f /proc/<PID>/cwd
+```
+
+Only continue when the command and working directory identify this project.
+Stop the confirmed residual process gracefully:
+
+```bash
+kill -TERM <PID>
+```
+
+If `ps` shows `T` or `Tl` in the `STAT` column, the process is stopped and
+cannot handle the termination signal until it is resumed:
+
+```bash
+kill -CONT <PID>
+kill -TERM <PID>
+```
+
+Verify that it released the process and port:
+
+```bash
+pgrep -af 'node server.js'
+ss -ltnp | grep ':3000'
+```
+
+If the confirmed process remains after a short wait, force-stop only that PID:
+
+```bash
+kill -KILL <PID>
+```
+
+Do not use `pkill node` or `killall node`; those commands can terminate
+unrelated Node.js applications. An empty `grep` result is normal when no
+process is listening on port `3000`.

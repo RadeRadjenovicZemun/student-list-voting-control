@@ -16,6 +16,9 @@ data/*
 missing_places.json
 place_overrides.json
 
+# Generated build artifacts (self-contained static demo export)
+dist/
+
 # Local editor and operating-system files
 .vscode/
 .DS_Store

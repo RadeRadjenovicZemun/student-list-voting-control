@@ -5,11 +5,78 @@ const crypto = require('crypto');
 const { exec, spawn } = require('child_process');
 const net = require('net');
 const messageModules = require('./server/messages');
+const documentBuilders = require('./server/documents');
+const {
+  createAccessControl,
+  isLoopbackAddress,
+  isPrivateLanAddress,
+  SESSION_MAX_AGE_MS
+} = require('./server/access-control');
 
 const app = express();
 app.use(express.json());
+const remoteAccess = createAccessControl();
+const REMOTE_ACCESS_COOKIE = 'votingRemoteAccess';
+const ACCESS_REQUEST_COOKIE = 'votingAccessRequest';
+
+function getClientIp(req) {
+  return String(req.socket && req.socket.remoteAddress || req.ip || '').replace(/^::ffff:/i, '');
+}
+
+function getCookie(req, name) {
+  const cookies = String(req.headers.cookie || '').split(';');
+  for (const cookie of cookies) {
+    const separator = cookie.indexOf('=');
+    if (separator < 0 || cookie.slice(0, separator).trim() !== name) continue;
+    try {
+      return decodeURIComponent(cookie.slice(separator + 1).trim());
+    } catch (error) {
+      return '';
+    }
+  }
+  return '';
+}
+
+function setAccessCookie(res, name, value, maxAge) {
+  const existing = res.getHeader('Set-Cookie');
+  const headers = existing ? (Array.isArray(existing) ? existing : [existing]) : [];
+  headers.push(`${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`);
+  res.setHeader('Set-Cookie', headers);
+}
+
+function clearAccessCookie(res, name) {
+  setAccessCookie(res, name, '', 0);
+}
+
+function localOnlyEndpoint(req) {
+  const pathname = req.path;
+  if (pathname.startsWith('/api/access/requests') || pathname.startsWith('/api/access/sessions')) return true;
+  if (pathname === '/api/dashboard-state' && req.method !== 'GET') return true;
+  if (pathname === '/api/config/clear-data') return true;
+  if (pathname === '/api/messages' || pathname.startsWith('/api/messages/')) return true;
+  if (pathname.startsWith('/api/signal/')) return true;
+  if (pathname === '/api/signal') return true;
+  if (pathname === '/api/signal/raw-messages') return true;
+  if ((pathname === '/api/irregularities' || pathname.startsWith('/api/irregularities/')) && req.method !== 'GET') return true;
+  if ((pathname === '/api/zap-records' || pathname.startsWith('/api/zap-records/')) && req.method !== 'GET') return true;
+  return false;
+}
+
+function sendAccessPage(res) {
+  res.sendFile(path.join(__dirname, 'public', 'access.html'));
+}
 
 const DATA_DIR = path.join(__dirname, 'data');
+const TURNOUT_PDF_FILENAME = 'Pracenje izlaznosti na birackom mestu.pdf';
+const PRELIMINARY_RESULTS_PDF_FILENAME = 'Preliminarni rezultati na birackom mestu.pdf';
+let documentRequestQueue = Promise.resolve();
+
+function enqueueDocumentRequest(task) {
+  const result = documentRequestQueue.then(task);
+  documentRequestQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
 const CONFIG_PATH = path.join(DATA_DIR, 'config.json');
 const SIGNAL_PATH = path.join(DATA_DIR, 'signal.json');
 const GENERAL_CONFIG_PATH = path.join(DATA_DIR, 'general-config.json');
@@ -21,6 +88,152 @@ const IRREGULARITIES_PATH = path.join(DATA_DIR, 'irregularities.json');
 const IRREGULARITIES_MEDIA_DIR = path.join(DATA_DIR, 'irregularities');
 const ZAP_RECORDS_PATH = path.join(DATA_DIR, 'zap_records.json');
 const ZAP_MEDIA_DIR = path.join(DATA_DIR, 'zap_records');
+
+function getRemoteRequestId(req) {
+  return getCookie(req, ACCESS_REQUEST_COOKIE);
+}
+
+function ensureRemoteAccessRequest(req, res) {
+  let requestId = getRemoteRequestId(req);
+  const status = requestId ? remoteAccess.getRequestStatus(requestId, getClientIp(req)).status : 'expired';
+  if (!requestId || ['expired', 'rejected', 'locked'].includes(status)) {
+    requestId = remoteAccess.createRequest(getClientIp(req), req.headers['user-agent'] || '');
+    setAccessCookie(res, ACCESS_REQUEST_COOKIE, requestId, 10 * 60);
+    try {
+      const notification = spawn('notify-send', [
+        'Remote dashboard access request',
+        `A device at ${getClientIp(req)} is waiting for approval.`
+      ], { stdio: 'ignore', detached: true });
+      notification.on('error', () => {});
+      notification.unref();
+    } catch (error) {
+      // The local dashboard polling panel remains the fallback notification.
+    }
+  }
+  return requestId;
+}
+
+function requireLocalOperator(req, res) {
+  if (isLoopbackAddress(getClientIp(req))) return true;
+  res.status(403).json({ error: 'local-operator-only' });
+  return false;
+}
+
+app.get('/access/status', (req, res) => {
+  if (!isPrivateLanAddress(getClientIp(req))) return res.status(403).json({ status: 'lan-only' });
+  const requestId = getRemoteRequestId(req);
+  res.json(remoteAccess.getRequestStatus(requestId, getClientIp(req)));
+});
+
+app.post('/access/verify', (req, res) => {
+  if (!isPrivateLanAddress(getClientIp(req))) return res.status(403).json({ error: 'lan-only' });
+  const result = remoteAccess.verifyCode(getRemoteRequestId(req), getClientIp(req), req.body && req.body.code);
+  if (!result.ok) {
+    const status = result.reason === 'invalid-code' ? 400 : (result.reason === 'too-many-attempts' ? 429 : 410);
+    return res.status(status).json({ error: result.reason });
+  }
+  setAccessCookie(res, REMOTE_ACCESS_COOKIE, result.token, Math.ceil(SESSION_MAX_AGE_MS / 1000));
+  clearAccessCookie(res, ACCESS_REQUEST_COOKIE);
+  res.json({ ok: true });
+});
+
+app.post('/access/heartbeat', (req, res) => {
+  if (!isPrivateLanAddress(getClientIp(req))) return res.status(403).json({ error: 'lan-only' });
+  const token = getCookie(req, REMOTE_ACCESS_COOKIE);
+  if (remoteAccess.isRevoked(token, getClientIp(req))) {
+    clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
+    return res.status(403).json({ error: 'access-revoked' });
+  }
+  const session = remoteAccess.heartbeat(token, getClientIp(req));
+  if (!session) {
+    clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
+    return res.status(401).json({ error: 'session-expired' });
+  }
+  setAccessCookie(res, REMOTE_ACCESS_COOKIE, getCookie(req, REMOTE_ACCESS_COOKIE), Math.ceil(SESSION_MAX_AGE_MS / 1000));
+  res.json({ ok: true, renewRequired: session.renewRequired, expiresAt: session.expiresAt });
+});
+
+app.post('/access/renew', (req, res) => {
+  if (!isPrivateLanAddress(getClientIp(req))) return res.status(403).json({ error: 'lan-only' });
+  const session = remoteAccess.renewSession(getCookie(req, REMOTE_ACCESS_COOKIE), getClientIp(req));
+  if (!session) {
+    clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
+    return res.status(401).json({ error: 'session-expired' });
+  }
+  setAccessCookie(res, REMOTE_ACCESS_COOKIE, getCookie(req, REMOTE_ACCESS_COOKIE), Math.ceil(SESSION_MAX_AGE_MS / 1000));
+  res.json({ ok: true, expiresAt: session.expiresAt });
+});
+
+app.post('/access/logout', (req, res) => {
+  remoteAccess.revokeSession(getCookie(req, REMOTE_ACCESS_COOKIE), getClientIp(req));
+  clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
+  res.json({ ok: true });
+});
+
+app.get('/access/revoked', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'access-revoked.html'));
+});
+
+app.get('/api/access/requests', (req, res) => {
+  if (!requireLocalOperator(req, res)) return;
+  res.json({ requests: remoteAccess.listRequests().filter((request) => ['pending', 'approved'].includes(request.status)) });
+});
+
+app.post('/api/access/requests/:id/approve', (req, res) => {
+  if (!requireLocalOperator(req, res)) return;
+  const approval = remoteAccess.approveRequest(req.params.id);
+  if (!approval) return res.status(409).json({ error: 'request-not-pending-or-expired' });
+  res.json(approval);
+});
+
+app.post('/api/access/requests/:id/reject', (req, res) => {
+  if (!requireLocalOperator(req, res)) return;
+  if (!remoteAccess.rejectRequest(req.params.id)) return res.status(409).json({ error: 'request-not-pending-or-expired' });
+  res.json({ ok: true });
+});
+
+app.get('/api/access/sessions', (req, res) => {
+  if (!requireLocalOperator(req, res)) return;
+  res.json({ sessions: remoteAccess.listSessions() });
+});
+
+app.delete('/api/access/sessions/:id', (req, res) => {
+  if (!requireLocalOperator(req, res)) return;
+  res.json({ ok: remoteAccess.revokeSessionByRequestId(req.params.id) });
+});
+
+app.use((req, res, next) => {
+  const ip = getClientIp(req);
+  if (isLoopbackAddress(ip)) {
+    req.remoteAccess = false;
+    return next();
+  }
+  if (!isPrivateLanAddress(ip)) return res.status(403).send('LAN access only.');
+  if (localOnlyEndpoint(req)) return res.status(403).json({ error: 'local-operator-only' });
+
+  const sessionToken = getCookie(req, REMOTE_ACCESS_COOKIE);
+  if (remoteAccess.isRevoked(sessionToken, ip)) {
+    clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
+    if (req.path.startsWith('/api/')) return res.status(403).json({ error: 'access-revoked' });
+    return res.sendFile(path.join(__dirname, 'public', 'access-revoked.html'));
+  }
+
+  const session = remoteAccess.authenticate(sessionToken, ip);
+  if (session) {
+    req.remoteAccess = true;
+    req.remoteAccessSession = session;
+    res.setHeader('X-Access-Role', 'remote');
+    return next();
+  }
+
+  if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'access-approval-required' });
+  ensureRemoteAccessRequest(req, res);
+  return sendAccessPage(res);
+});
+
+app.get('/api/access/session', (req, res) => {
+  res.json({ remoteAccess: Boolean(req.remoteAccess), renewRequired: Boolean(req.remoteAccessSession && req.remoteAccessSession.renewRequired) });
+});
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -217,7 +430,33 @@ function loadConfig() {
 
 function defaultGeneralConfig() {
   return {
-    heartbeatMinutes: 1
+    heartbeatMinutes: 1,
+    dashboardState: {
+      electionFamily: 'parliamentary',
+      parliamentaryPhase: null,
+      presidentialPhase: null,
+      localPhase: null,
+      stopwatchRunning: false,
+      stopwatchElapsedMs: 0,
+      stopwatchStartedAt: null
+    }
+  };
+}
+
+function normalizeDashboardState(value = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  const family = ['parliamentary', 'presidental', 'local'].includes(source.electionFamily)
+    ? source.electionFamily
+    : 'parliamentary';
+  const startedAt = Number(source.stopwatchStartedAt);
+  return {
+    electionFamily: family,
+    parliamentaryPhase: source.parliamentaryPhase ? String(source.parliamentaryPhase) : null,
+    presidentialPhase: source.presidentialPhase ? String(source.presidentialPhase) : null,
+    localPhase: source.localPhase ? String(source.localPhase) : null,
+    stopwatchRunning: Boolean(source.stopwatchRunning && Number.isFinite(startedAt) && startedAt > 0),
+    stopwatchElapsedMs: Math.max(0, Number(source.stopwatchElapsedMs) || 0),
+    stopwatchStartedAt: Number.isFinite(startedAt) && startedAt > 0 ? startedAt : null
   };
 }
 
@@ -230,11 +469,64 @@ function loadGeneralConfig() {
     const parsed = JSON.parse(raw);
     const heartbeatMinutes = Number(parsed.heartbeatMinutes);
     const safeMinutes = Number.isFinite(heartbeatMinutes) && heartbeatMinutes > 0 ? heartbeatMinutes : 1;
-    return { heartbeatMinutes: safeMinutes };
+    return {
+      heartbeatMinutes: safeMinutes,
+      dashboardState: normalizeDashboardState(parsed.dashboardState)
+    };
   } catch (err) {
     console.warn('Failed to load general-config.json, using defaults:', err.message);
     return defaultGeneralConfig();
   }
+}
+
+function saveDashboardState(dashboardState) {
+  const parsed = loadGeneralConfig();
+  parsed.dashboardState = normalizeDashboardState(dashboardState);
+  fs.writeFileSync(GENERAL_CONFIG_PATH, JSON.stringify(parsed, null, 2), 'utf8');
+  return parsed.dashboardState;
+}
+
+function areRemoteResultsLocked() {
+  const state = loadGeneralConfig().dashboardState;
+  if (state.electionFamily !== 'parliamentary' || state.parliamentaryPhase !== 'electionDay') return false;
+  const localTime = new Date();
+  return localTime.getHours() < 20;
+}
+
+function getRemoteResultsUnlockAt() {
+  const state = loadGeneralConfig().dashboardState;
+  return state.electionFamily === 'parliamentary' && state.parliamentaryPhase === 'electionDay'
+    ? '20:00'
+    : null;
+}
+
+function redactResults(config) {
+  const safeConfig = JSON.parse(JSON.stringify(config));
+  const visit = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.result && typeof node.result === 'object') {
+      if (Array.isArray(node.result.candidateVotes)) {
+        node.result.candidateVotes = node.result.candidateVotes.map((candidate) => ({ ...candidate, votes: 0, percentage: 0 }));
+      }
+      if (Array.isArray(node.result.nonValidVotes)) {
+        node.result.nonValidVotes = node.result.nonValidVotes.map((vote) => ({ ...vote, votes: 0 }));
+      }
+      node.result.nonRegularBallots = 0;
+      node.result.remainingBallots = 0;
+    }
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) value.forEach(visit);
+      else if (value && typeof value === 'object') visit(value);
+    }
+  };
+  visit(safeConfig);
+  return safeConfig;
+}
+
+function isResultsCommandMessage(message) {
+  const type = String(message && message.type || '').toLowerCase();
+  const text = String(message && (message.rawMessage || message.text) || '').trim();
+  return type.includes('rezultat') || type.includes('result') || /^rez\s*:/i.test(text);
 }
 
 function getSignalHeartbeatTimeoutMs() {
@@ -417,6 +709,7 @@ function defaultSignalConfig() {
     enabled: true,
     connected: false,
     selectedGroupId: null,
+    assignedGroupIds: [],
     groups: [],
     lastCheck: null,
     lastHeartbeatAt: null,
@@ -432,6 +725,11 @@ function normalizeSignalGroups(groups) {
   }));
 }
 
+function normalizeAssignedSignalGroupIds(groupIds, groups = []) {
+  const ids = Array.isArray(groupIds) ? [...new Set(groupIds.map(String))] : [];
+  return groups.length ? ids.filter((id) => groups.some((group) => group.id === id)) : ids;
+}
+
 function loadSignalConfig() {
   try {
     if (!fs.existsSync(SIGNAL_PATH)) {
@@ -445,11 +743,16 @@ function loadSignalConfig() {
     const selectedGroupId = parsed.selectedGroupId && groups.some(group => group.id === parsed.selectedGroupId)
       ? parsed.selectedGroupId
       : null;
+    const configuredAssignedIds = Array.isArray(parsed.assignedGroupIds)
+      ? parsed.assignedGroupIds
+      : (selectedGroupId ? [selectedGroupId] : []);
+    const assignedGroupIds = normalizeAssignedSignalGroupIds(configuredAssignedIds, groups);
 
     return {
       enabled: parsed.enabled !== false,
       connected: Boolean(parsed.connected),
       selectedGroupId,
+      assignedGroupIds,
       groups,
       lastCheck: parsed.lastCheck || null,
       lastHeartbeatAt: parsed.lastHeartbeatAt || null,
@@ -771,12 +1074,13 @@ function normalizeNameForCompare(value) {
   return String(value || '').trim().toLocaleLowerCase('sr');
 }
 
-async function sendSignalReply({ groupId, recipientNumber, messageText }) {
-  if (!messageText) {
+async function sendSignalReply({ groupId, recipientNumber, messageText, attachments = [] }) {
+  if (!messageText && !attachments.length) {
     return { ok: false, reason: 'missing-message' };
   }
 
   const params = { message: messageText };
+  if (attachments.length) params.attachments = attachments;
   if (recipientNumber) {
     params.recipient = recipientNumber;
   } else if (groupId) {
@@ -819,6 +1123,12 @@ const buildRezultatiAcceptedReply = (...args) => messageModules.rezultati.buildR
 
 async function handleIncomingMessageProcessing({ sender, senderNumber = null, text, attachments = [], groupId, groupName, direction = 'incoming', region = null, place = null }) {
   const config = loadConfig();
+  if (groupId) {
+    const signal = loadSignalConfig();
+    if (!signal.assignedGroupIds.includes(String(groupId))) {
+      return { accepted: false, reason: 'signal-group-not-assigned' };
+    }
+  }
   const matched = matchTemplates(config, text);
   if (!matched) {
     const senderCfg = findSenderConfig(config, sender);
@@ -960,6 +1270,86 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
   }
 
   const votePlace = findPlaceConfigBySender(config, senderCfg.region, senderCfg.municipality, senderCfg.place);
+  if (matched.type === 'documents') {
+    if (!senderNumber) {
+      return { accepted: false, reason: 'requester-number-unavailable' };
+    }
+
+    return enqueueDocumentRequest(async () => {
+      const requested = [matched.fields.documentOne, matched.fields.documentTwo]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase());
+      const documents = requested.length ? [...new Set(requested)] : ['izl', 'pre'];
+      const generatedDocumentsDirectory = path.join(DATA_DIR, 'generated_documents');
+      fs.mkdirSync(generatedDocumentsDirectory, { recursive: true });
+      const requestedDocuments = [];
+
+      try {
+        const context = {
+          config,
+          regionName: senderCfg.region,
+          municipalityName: senderCfg.municipality,
+          placeName: senderCfg.place,
+          place: votePlace || {}
+        };
+
+        for (const documentType of documents) {
+          const isTurnout = documentType === 'izl';
+          const pdf = isTurnout
+            ? await documentBuilders.createTurnoutPdf(context)
+            : await documentBuilders.createPreliminaryResultsPdf(context);
+          const fileName = isTurnout ? TURNOUT_PDF_FILENAME : PRELIMINARY_RESULTS_PDF_FILENAME;
+          const filePath = path.join(generatedDocumentsDirectory, fileName);
+          fs.writeFileSync(filePath, pdf);
+          requestedDocuments.push({ documentType, filePath });
+        }
+
+        for (const { documentType, filePath } of requestedDocuments) {
+          const messageText = documentType === 'izl'
+            ? 'У прилогу је образац за праћење излазности.'
+            : 'У прилогу је образац за унос прелиминарних резултата.';
+          const replyStatus = await sendSignalReply({
+            groupId,
+            recipientNumber: senderNumber,
+            messageText,
+            attachments: [filePath]
+          });
+          if (!replyStatus.ok) {
+            console.warn('Document reply could not be sent:', replyStatus.reason || 'unknown-error');
+            return { accepted: false, reason: replyStatus.reason || 'document-send-failed' };
+          }
+        }
+
+        const record = addAcceptedSignalRecord({
+          sender,
+          text,
+          groupId,
+          groupName,
+          direction,
+          region: senderCfg.region,
+          place: senderCfg.place,
+          type: matched.type,
+          payload: { documents }
+        });
+        addAcceptedSignalRecord({
+          sender: 'local-backend',
+          text: 'У прилогу су тражени PDF обрасци за ваше бирачко место.',
+          groupId,
+          groupName,
+          direction: 'outgoing',
+          region: senderCfg.region || null,
+          place: senderCfg.place || null,
+          type: 'documents-reply',
+          payload: { documents, attachmentNames: requestedDocuments.map(({ filePath }) => path.basename(filePath)) }
+        });
+        return { accepted: true, record, documents, replySent: true };
+      } catch (err) {
+        console.error('Failed to generate or send requested PDF documents:', err.message);
+        return { accepted: false, reason: 'document-generation-failed' };
+      }
+    });
+  }
+
   if (votePlace && String(votePlace.senderStatus) === '0' && matched.type !== 'status' && matched.type !== 'help' && matched.type !== 'irregularity') {
     const i18n = loadI18n();
     const msg = (i18n.multiLanguage && i18n.multiLanguage.sr && i18n.multiLanguage.sr.ui &&
@@ -1902,7 +2292,28 @@ const applyRegistrationMessage = (...args) => messageModules.registerController.
 
 app.get('/api/config', (req, res) => {
   const config = loadConfig();
+  if (req.remoteAccess && areRemoteResultsLocked()) {
+    return res.json(redactResults(config));
+  }
   res.json(config);
+});
+
+app.get('/api/dashboard-state', (req, res) => {
+  const dashboardState = loadGeneralConfig().dashboardState;
+  const stopwatchElapsedMs = dashboardState.stopwatchRunning && dashboardState.stopwatchStartedAt
+    ? Math.max(0, Date.now() - dashboardState.stopwatchStartedAt)
+    : dashboardState.stopwatchElapsedMs;
+  res.json({
+    ...dashboardState,
+    stopwatchElapsedMs,
+    resultsLocked: areRemoteResultsLocked(),
+    resultsUnlockAtLocalTime: getRemoteResultsUnlockAt()
+  });
+});
+
+app.put('/api/dashboard-state', (req, res) => {
+  const dashboardState = saveDashboardState(req.body && req.body.dashboardState);
+  res.json({ ok: true, dashboardState });
 });
 
 app.post('/api/config/clear-data', (req, res) => {
@@ -2031,6 +2442,7 @@ async function refreshSignalRuntimeState() {
    signal.lastHeartbeatAt = new Date().toISOString();
    signal.lastCheck = signal.lastHeartbeatAt;
    signal.groups = groups;
+  signal.assignedGroupIds = normalizeAssignedSignalGroupIds(signal.assignedGroupIds, groups);
    if (!signal.selectedGroupId && signal.groups.length) {
      signal.selectedGroupId = signal.groups[0].id;
    }
@@ -2075,6 +2487,7 @@ app.get('/api/signal/status', async (req, res) => {
    signal.lastHeartbeatAt = new Date().toISOString();
    signal.lastCheck = signal.lastHeartbeatAt;
    signal.groups = groups;
+  signal.assignedGroupIds = normalizeAssignedSignalGroupIds(signal.assignedGroupIds, groups);
    if (!signal.groups.length) {
      signal.selectedGroupId = null;
    }
@@ -2089,6 +2502,7 @@ app.get('/api/signal/status', async (req, res) => {
      connected: true,
      selectedGroupId: group ? group.id : null,
      selectedGroupName: group ? group.name : null,
+    assignedGroupIds: signal.assignedGroupIds,
      groups: signal.groups,
      lastCheck: signal.lastCheck,
      lastMessage: signal.lastMessage,
@@ -2110,6 +2524,7 @@ app.get('/api/signal/status', async (req, res) => {
    connected: false,
    selectedGroupId: null,
    selectedGroupName: null,
+   assignedGroupIds: signal.assignedGroupIds,
    groups: [],
    lastCheck: null,
    lastMessage: signal.lastMessage,
@@ -2120,9 +2535,27 @@ app.get('/api/signal/status', async (req, res) => {
 app.get('/api/signal/groups', (req, res) => {
  const signal = loadSignalConfig();
  if (!signal.connected || !isSignalHeartbeatFresh(signal)) {
-   return res.json({ groups: [], selectedGroupId: null });
+   return res.json({ groups: [], selectedGroupId: null, assignedGroupIds: signal.assignedGroupIds });
  }
- res.json({ groups: signal.groups, selectedGroupId: signal.selectedGroupId });
+ res.json({ groups: signal.groups, selectedGroupId: signal.selectedGroupId, assignedGroupIds: signal.assignedGroupIds });
+});
+
+app.post('/api/signal/assign-groups', (req, res) => {
+ const signal = loadSignalConfig();
+ const requestedIds = req.body && req.body.assignedGroupIds;
+ if (!Array.isArray(requestedIds)) {
+   return res.status(400).json({ ok: false, reason: 'assigned-group-ids-required' });
+ }
+
+ signal.assignedGroupIds = normalizeAssignedSignalGroupIds(requestedIds, signal.groups);
+ saveSignalConfig(signal);
+ const assignedGroups = signal.groups.filter(group => signal.assignedGroupIds.includes(group.id));
+ signal.lastMessage = assignedGroups.length
+   ? `Responding to ${assignedGroups.length} assigned Signal group${assignedGroups.length === 1 ? '' : 's'}.`
+   : 'No Signal groups are assigned for command responses.';
+ saveSignalConfig(signal);
+
+ res.json({ ok: true, assignedGroupIds: signal.assignedGroupIds, assignedGroups, lastMessage: signal.lastMessage });
 });
 
 app.post('/api/signal/heartbeat', (req, res) => {
@@ -2547,7 +2980,9 @@ app.get('/api/summary', (req, res) => {
     placeTotals,
     placeTotalsInPlace,
     placeTotalsFromHome,
-    recentMessages
+    recentMessages: req.remoteAccess && areRemoteResultsLocked()
+      ? recentMessages.filter((message) => !isResultsCommandMessage(message))
+      : recentMessages
   });
 });
 

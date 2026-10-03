@@ -1,5 +1,11 @@
 
       let cachedConfig = null;
+      let remoteAccessMode = false;
+      let remoteResultsLocked = true;
+      let remoteResultsUnlockAt = '20:00';
+      let accessControlPollTimer = null;
+      let accessDialogRequestId = null;
+      const announcedAccessRequestIds = new Set();
 
       const sidebar = document.getElementById('sidebar');
       const sidebarPin = document.getElementById('sidebarPin');
@@ -402,6 +408,30 @@
           settingsSignalTab.textContent = settingsTabs.signal || 'Signal';
         }
 
+        const accessLabels = {
+          '[data-debug-tab="debug-tab-access-control"]': locale.accessControlTab || 'Access Control',
+          '#accessRequestsTitle': locale.accessRequestsTitle || 'Access requests',
+          '#accessSessionsTitle': locale.accessSessionsTitle || 'Active sessions',
+          '#accessRequestsIpHeader': locale.accessIpHeader || 'IP address',
+          '#accessSessionsIpHeader': locale.accessIpHeader || 'IP address',
+          '#accessRequestedAtHeader': locale.accessRequestedAtHeader || 'Request time',
+          '#accessDeviceHeader': locale.accessDeviceHeader || 'Device',
+          '#accessSessionDeviceHeader': locale.accessDeviceHeader || 'Device',
+          '#accessDecisionHeader': locale.accessDecisionHeader || 'Decision',
+          '#accessApprovedAtHeader': locale.accessApprovedAtHeader || 'Approved',
+          '#accessLastActivityHeader': locale.accessLastActivityHeader || 'Last activity',
+          '#accessExpiresHeader': locale.accessExpiresHeader || 'Expires',
+          '#accessRequestDialogTitle': locale.accessDialogNewRequestTitle || 'New access request',
+          '#accessApprovalCodeLabel': locale.accessDialogOneTimeCode || 'Provide this one-time code to the user:',
+          '#accessDialogApproveBtn': locale.accessApproveButton || 'Approve',
+          '#accessDialogRejectBtn': locale.accessRejectButton || 'Reject',
+          '#accessDialogCloseBtn': locale.accessDialogClose || 'Close'
+        };
+        Object.entries(accessLabels).forEach(([selector, text]) => {
+          const element = document.querySelector(selector);
+          if (element) element.textContent = text;
+        });
+
         const signalDescription = document.getElementById('signalDescription');
         if (signalDescription) {
           signalDescription.textContent = locale.signalDescription || 'Connects to Signal App group responsible for collecting election results and different statuses';
@@ -523,6 +553,7 @@
         const phaseLabels = {
           parliamentaryPhasePreparationLabel: parliamentaryPhaseSelector.preparationPhase || 'Preparation',
           parliamentaryPhaseElectionDayLabel: parliamentaryPhaseSelector.electionDay || 'Election Day',
+          parliamentaryPhasePostElectionLabel: parliamentaryPhaseSelector.postElection || 'Post Election',
           parliamentaryPhaseRepeatedLabel: parliamentaryPhaseSelector.repeatedElections || 'Repeated Election'
         };
         Object.entries(phaseLabels).forEach(([id, value]) => {
@@ -583,19 +614,21 @@
       function getNavigationItems(config) {
         const languageConfig = getLanguageConfig(config);
         const raw = languageConfig.navigation || config && (config.navigation || config.menu || config.nav || config.sidebarMenu || config.controls);
-        if (Array.isArray(raw) && raw.length) {
-          return raw.map((item) => ({
+        const items = Array.isArray(raw) && raw.length
+          ? raw.map((item) => ({
             id: item.id || item.panel || item.key || item.name || 'item',
             label: item.label || item.name || item.title || item.text || item.id || 'Item'
-          }));
-        }
-        return [
-          { id: 'izlaznost', label: 'Izlaznost' },
-          { id: 'rezultati', label: 'Izborni rezultati' },
-          { id: 'irregularities', label: 'Irregularities' },
-          { id: 'debug', label: 'Alati' },
-          { id: 'language', label: 'Jezik' }
-        ];
+          }))
+          : [
+            { id: 'izlaznost', label: 'Izlaznost' },
+            { id: 'rezultati', label: 'Izborni rezultati' },
+            { id: 'irregularities', label: 'Irregularities' },
+            { id: 'debug', label: 'Alati' },
+            { id: 'language', label: 'Jezik' }
+          ];
+        return remoteAccessMode
+          ? items.filter((item) => !['debug', 'tools', 'alati'].includes(String(item.id).toLowerCase()))
+          : items;
       }
 
       function renderSidebarLanguageSelector(config) {
@@ -656,6 +689,11 @@
         if (!nav) return;
 
         nav.innerHTML = '';
+        const debugPanel = document.getElementById('panel-debug');
+        if (debugPanel) {
+          debugPanel.hidden = remoteAccessMode;
+          if (remoteAccessMode) debugPanel.style.display = 'none';
+        }
         const items = getNavigationItems(config);
         items.forEach((item, index) => {
           if (item.id === 'language') return;
@@ -665,6 +703,11 @@
           button.className = `menu-item${index === 0 ? ' active' : ''}`;
           button.dataset.panel = item.id;
           button.textContent = item.label;
+          if (remoteAccessMode && remoteResultsLocked && item.id === 'rezultati') {
+            button.disabled = true;
+            button.title = `Резултати ће бити доступни од ${remoteResultsUnlockAt} по локалном времену сервера.`;
+            button.setAttribute('aria-label', `${item.label}. Доступно од ${remoteResultsUnlockAt}.`);
+          }
           button.addEventListener('click', () => {
             if (button.disabled) return;
             document.querySelectorAll('.menu-item').forEach((b) => b.classList.toggle('active', b === button));
@@ -845,7 +888,250 @@
 
       syncSidebarState();
 
+      async function initializeAccessMode() {
+        try {
+          const response = await fetch('/api/access/session', { cache: 'no-store' });
+          if (!response.ok) {
+            remoteAccessMode = true;
+            return;
+          }
+          const state = await response.json();
+          remoteAccessMode = Boolean(state.remoteAccess);
+          if (remoteAccessMode) startRemoteSessionHeartbeat();
+        } catch (error) {
+          remoteAccessMode = true;
+        }
+      }
+
+      function enforceRemoteDashboardView() {
+        if (!remoteAccessMode) return;
+        const toolsPanel = document.getElementById('panel-debug');
+        if (toolsPanel) {
+          toolsPanel.hidden = true;
+          toolsPanel.style.display = 'none';
+          toolsPanel.classList.remove('active-panel');
+        }
+        const resultsPanel = document.getElementById('panel-rezultati');
+        if (resultsPanel) {
+          resultsPanel.hidden = remoteResultsLocked;
+          if (remoteResultsLocked) {
+            resultsPanel.style.display = 'none';
+            resultsPanel.classList.remove('active-panel');
+          }
+        }
+        const turnoutPanel = document.getElementById('panel-izlaznost');
+        if (turnoutPanel) {
+          turnoutPanel.hidden = false;
+          turnoutPanel.style.display = '';
+          turnoutPanel.classList.add('active-panel');
+        }
+        const turnoutNavigationItem = document.querySelector('.menu-item[data-panel="izlaznost"]');
+        if (turnoutNavigationItem) {
+          document.querySelectorAll('.menu-item').forEach((item) => item.classList.toggle('active', item === turnoutNavigationItem));
+          const title = document.getElementById('pageTitle');
+          if (title) title.textContent = turnoutNavigationItem.textContent;
+        }
+      }
+
+      function startRemoteSessionHeartbeat() {
+        let heartbeatInProgress = false;
+        let heartbeatTimer = null;
+        const heartbeat = async () => {
+          if (heartbeatInProgress || !remoteAccessMode) return;
+          heartbeatInProgress = true;
+          try {
+            const response = await fetch('/access/heartbeat', { method: 'POST', cache: 'no-store' });
+            if (response.status === 401) {
+              location.replace('/');
+              return;
+            }
+            if (response.status === 403) {
+              const result = await response.json().catch(() => ({}));
+              if (result.error === 'access-revoked') {
+                remoteAccessMode = false;
+                if (heartbeatTimer) clearInterval(heartbeatTimer);
+                location.replace('/access/revoked');
+                return;
+              }
+            }
+            if (!response.ok) return;
+            const state = await response.json();
+            if (state.renewRequired) {
+              const extend = window.confirm('Ваша удаљена сесија ће ускоро истећи. Желите ли да је продужите за још 30 минута?');
+              if (!extend) {
+                await fetch('/access/logout', { method: 'POST' });
+                location.replace('/');
+                return;
+              }
+              const renewed = await fetch('/access/renew', { method: 'POST' });
+              if (!renewed.ok) location.replace('/');
+            }
+          } catch (error) {
+            // A later heartbeat can recover from a brief network interruption.
+          } finally {
+            heartbeatInProgress = false;
+          }
+        };
+        heartbeat();
+        heartbeatTimer = setInterval(heartbeat, 20000);
+      }
+      function accessLocaleText(key, fallback, values = {}) {
+        let text = String(getLocaleDictionary()[key] || fallback);
+        for (const [name, value] of Object.entries(values)) {
+          text = text.replaceAll(`{${name}}`, String(value));
+        }
+        return text;
+      }
+
+      function setAccessControlStatus(message) {
+        const status = document.getElementById('accessControlStatus');
+        if (status) status.textContent = message || '';
+      }
+
+      function setAccessTableMessage(tbody, columns, message) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = columns;
+        cell.textContent = message;
+        row.appendChild(cell);
+        tbody.replaceChildren(row);
+      }
+
+      async function handleAccessRequestDecision(requestId, approve) {
+        const response = await fetch(`/api/access/requests/${encodeURIComponent(requestId)}/${approve ? 'approve' : 'reject'}`, { method: 'POST' });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(accessLocaleText('accessRequestConflict', 'This request is no longer active.'));
+
+        if (approve) {
+          accessDialogRequestId = requestId;
+          document.getElementById('accessRequestDialogDetails').textContent = accessLocaleText('accessDialogApprovedRequest', 'Device {ip} approved.', { ip: result.ip || '' });
+          document.getElementById('accessRequestDecisionActions').hidden = true;
+          document.getElementById('accessApprovalCodePanel').hidden = false;
+          document.getElementById('accessApprovalCode').textContent = result.code;
+          document.getElementById('accessApprovalExpiry').textContent = accessLocaleText('accessDialogCodeExpires', 'Code expires at {time}.', { time: new Date(result.codeExpiresAt).toLocaleTimeString() });
+          const dialog = document.getElementById('accessRequestDialog');
+          if (!dialog.open) dialog.showModal();
+        } else if (accessDialogRequestId === requestId) {
+          document.getElementById('accessRequestDialog').close();
+        }
+        await refreshAccessControlPanel();
+      }
+
+      function renderAccessRequestRows(requests) {
+        const tbody = document.getElementById('accessRequestsBody');
+        if (!tbody) return;
+        const locale = getLocaleDictionary();
+        if (!requests.length) return setAccessTableMessage(tbody, 4, locale.accessNoRequests || 'No access requests.');
+        tbody.replaceChildren();
+        for (const request of requests) {
+          const row = document.createElement('tr');
+          for (const value of [request.ip, new Date(request.requestedAt).toLocaleString(), request.userAgent || '—']) {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            row.appendChild(cell);
+          }
+          const actions = document.createElement('td');
+          if (request.status === 'pending') {
+            const buttons = document.createElement('div');
+            buttons.className = 'access-control-row-actions';
+            const approve = document.createElement('button');
+            approve.type = 'button';
+            approve.textContent = locale.accessApproveButton || 'Approve';
+            approve.addEventListener('click', () => handleAccessRequestDecision(request.id, true).catch((error) => setAccessControlStatus(error.message)));
+            const reject = document.createElement('button');
+            reject.type = 'button';
+            reject.className = 'reject';
+            reject.textContent = locale.accessRejectButton || 'Reject';
+            reject.addEventListener('click', () => handleAccessRequestDecision(request.id, false).catch((error) => setAccessControlStatus(error.message)));
+            buttons.append(approve, reject);
+            actions.appendChild(buttons);
+          } else {
+            actions.textContent = locale.accessCodeIssued || 'Code issued';
+          }
+          row.appendChild(actions);
+          tbody.appendChild(row);
+        }
+      }
+
+      function renderAccessSessionRows(sessions) {
+        const tbody = document.getElementById('accessSessionsBody');
+        if (!tbody) return;
+        const locale = getLocaleDictionary();
+        if (!sessions.length) return setAccessTableMessage(tbody, 6, locale.accessNoSessions || 'Нема активних удаљених сесија.');
+        tbody.replaceChildren();
+        for (const session of sessions) {
+          const row = document.createElement('tr');
+          for (const value of [session.ip, session.userAgent || '—', new Date(session.createdAt).toLocaleString(), new Date(session.lastSeenAt).toLocaleTimeString(), new Date(session.expiresAt).toLocaleTimeString()]) {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            row.appendChild(cell);
+          }
+          const actionCell = document.createElement('td');
+          const revoke = document.createElement('button');
+          revoke.type = 'button';
+          revoke.className = 'reject';
+          revoke.textContent = locale.accessRevokeButton || 'Revoke';
+          revoke.addEventListener('click', async () => {
+            await fetch(`/api/access/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
+            await refreshAccessControlPanel();
+          });
+          actionCell.appendChild(revoke);
+          row.appendChild(actionCell);
+          tbody.appendChild(row);
+        }
+      }
+
+      async function refreshAccessControlPanel() {
+        if (remoteAccessMode) return;
+        try {
+          const [requestsResponse, sessionsResponse] = await Promise.all([
+            fetch('/api/access/requests', { cache: 'no-store' }),
+            fetch('/api/access/sessions', { cache: 'no-store' })
+          ]);
+          if (!requestsResponse.ok || !sessionsResponse.ok) return;
+          const requestData = await requestsResponse.json();
+          const sessionData = await sessionsResponse.json();
+          const requests = requestData.requests || [];
+          renderAccessRequestRows(requests);
+          renderAccessSessionRows(sessionData.sessions || []);
+          const newest = requests.find((request) => request.status === 'pending' && !announcedAccessRequestIds.has(request.id));
+          const dialog = document.getElementById('accessRequestDialog');
+          if (newest && dialog && !dialog.open) {
+            announcedAccessRequestIds.add(newest.id);
+            accessDialogRequestId = newest.id;
+            document.getElementById('accessRequestDialogDetails').textContent = `Уређај са IP адресом ${newest.ip} тражи приступ контролној табли.`;
+            document.getElementById('accessRequestDecisionActions').hidden = false;
+            document.getElementById('accessApprovalCodePanel').hidden = true;
+            dialog.showModal();
+          }
+        } catch (error) {
+          setAccessControlStatus(getLocaleDictionary().accessRefreshFailed || 'Unable to refresh access requests.');
+                    document.getElementById('accessRequestDialogDetails').textContent = accessLocaleText('accessDialogPendingRequest', 'A device at IP address {ip} is requesting dashboard access.', { ip: newest.ip });
+        }
+      }
+
+      function setupAccessControl() {
+        const dialog = document.getElementById('accessRequestDialog');
+        document.getElementById('accessDialogApproveBtn')?.addEventListener('click', () => {
+          if (accessDialogRequestId) handleAccessRequestDecision(accessDialogRequestId, true).catch((error) => setAccessControlStatus(error.message));
+        });
+        document.getElementById('accessDialogRejectBtn')?.addEventListener('click', () => {
+          if (accessDialogRequestId) handleAccessRequestDecision(accessDialogRequestId, false).catch((error) => setAccessControlStatus(error.message));
+        });
+        document.getElementById('accessDialogCloseBtn')?.addEventListener('click', () => dialog?.close());
+        refreshAccessControlPanel();
+        if (!accessControlPollTimer) accessControlPollTimer = setInterval(refreshAccessControlPanel, 4000);
+      }
+
       function setupDebugTabs() {
+        if (remoteAccessMode) {
+          const toolsPanel = document.getElementById('panel-debug');
+          if (toolsPanel) {
+            toolsPanel.hidden = true;
+            toolsPanel.style.display = 'none';
+          }
+          return;
+        }
         const buttons = document.querySelectorAll('.debug-tab-btn');
         const panels = document.querySelectorAll('.debug-tab-panel');
         const debugTabs = getLanguageConfig(cachedConfig || {}, activeLanguage).debugTabs || { main: 'Debug', settings: 'Podesavanja' };
@@ -1051,19 +1337,27 @@
           });
         });
 
-        activateElectionPhaseTab('election-phase-tab-parliamentary');
+        const initialPhaseTab = activeElectionFamily === 'presidental'
+          ? 'election-phase-tab-presidental'
+          : activeElectionFamily === 'local'
+            ? 'election-phase-tab-local'
+            : 'election-phase-tab-parliamentary';
+        activateElectionPhaseTab(initialPhaseTab, false);
+        syncElectionPhaseControls();
 
         const selectorButtons = document.querySelectorAll('input[data-parliamentary-phase]');
         const selectorLabels = getLocaleDictionary().parliamentaryPhaseSelector || {};
         const labelMap = {
           preparationPhase: selectorLabels.preparationPhase || 'Preparation',
           electionDay: selectorLabels.electionDay || 'Election Day',
+          postElection: selectorLabels.postElection || 'Post Election',
           repeatedElections: selectorLabels.repeatedElections || 'Repeated Election'
         };
         selectorButtons.forEach((input) => {
           const labelIdMap = {
             preparationPhase: 'parliamentaryPhasePreparationLabel',
             electionDay: 'parliamentaryPhaseElectionDayLabel',
+            postElection: 'parliamentaryPhasePostElectionLabel',
             repeatedElections: 'parliamentaryPhaseRepeatedLabel'
           };
           const labelEl = document.getElementById(labelIdMap[input.dataset.parliamentaryPhase]);
@@ -1084,6 +1378,7 @@
             });
             updateParliamentaryViewVisibility();
             updateBannerTitle();
+            persistSharedDashboardState();
           });
         });
 
@@ -1122,6 +1417,7 @@
             });
             updateParliamentaryViewVisibility();
             updateBannerTitle();
+            persistSharedDashboardState();
           });
         });
 
@@ -1160,12 +1456,13 @@
             });
             updateParliamentaryViewVisibility();
             updateBannerTitle();
+            persistSharedDashboardState();
           });
         });
 
       }
 
-      function activateElectionPhaseTab(targetId) {
+      function activateElectionPhaseTab(targetId, persist = true) {
         const buttons = document.querySelectorAll('.election-phase-tab-btn');
         const panels = document.querySelectorAll('.election-phase-tab-panel');
         const targetPanel = document.getElementById(targetId);
@@ -1194,6 +1491,7 @@
         updateParliamentaryViewVisibility();
         updateBannerTitle();
         renderCoverageStatusPanel();
+        if (persist) persistSharedDashboardState();
       }
 
       function formatDashboardLabel(value) {
@@ -1287,7 +1585,8 @@
         const hasElectionSelection = Boolean(activeParliamentaryPhase || activePresidentialPhase || activeLocalPhase);
         document.querySelectorAll('.menu-item').forEach((button) => {
           const panel = button.dataset.panel;
-          const disable = !hasElectionSelection && (panel === 'izlaznost' || panel === 'rezultati');
+          const disable = (!hasElectionSelection && (panel === 'izlaznost' || panel === 'rezultati'))
+            || (remoteAccessMode && remoteResultsLocked && panel === 'rezultati');
           button.disabled = disable;
           button.classList.toggle('disabled', disable);
           button.setAttribute('aria-disabled', String(disable));
@@ -1315,6 +1614,7 @@
         }
         updateParliamentaryViewVisibility();
         updateBannerTitle();
+        persistSharedDashboardState();
       }
 
       let stopwatchRunning = false;
@@ -1322,6 +1622,109 @@
       let stopwatchStartTs = 0;
       let stopwatchStartedAtTs = null;
       let stopwatchTimerId = null;
+
+      function syncElectionPhaseControls() {
+        document.querySelectorAll('input[data-parliamentary-phase]').forEach((input) => {
+          input.checked = input.dataset.parliamentaryPhase === activeParliamentaryPhase;
+        });
+        document.querySelectorAll('input[data-presidental-phase]').forEach((input) => {
+          input.checked = input.dataset.presidentalPhase === activePresidentialPhase;
+        });
+        document.querySelectorAll('input[data-local-phase]').forEach((input) => {
+          input.checked = input.dataset.localPhase === activeLocalPhase;
+        });
+      }
+
+      function getSharedDashboardState() {
+        return {
+          electionFamily: activeElectionFamily,
+          parliamentaryPhase: activeParliamentaryPhase,
+          presidentialPhase: activePresidentialPhase,
+          localPhase: activeLocalPhase,
+          stopwatchRunning,
+          stopwatchElapsedMs: stopwatchRunning && stopwatchStartTs
+            ? Math.max(0, Date.now() - stopwatchStartTs)
+            : stopwatchElapsedMs,
+          stopwatchStartedAt: stopwatchRunning ? stopwatchStartedAtTs : null
+        };
+      }
+
+      async function persistSharedDashboardState() {
+        if (remoteAccessMode) return;
+        try {
+          await fetch('/api/dashboard-state', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dashboardState: getSharedDashboardState() })
+          });
+        } catch (error) {
+          console.warn('Unable to save shared dashboard state:', error.message);
+        }
+      }
+
+      function applySharedDashboardState(state) {
+        if (!state || typeof state !== 'object') return;
+        const wasResultsLocked = remoteResultsLocked;
+        remoteResultsLocked = Boolean(state.resultsLocked);
+        remoteResultsUnlockAt = state.resultsUnlockAtLocalTime || '20:00';
+        activeElectionFamily = ['parliamentary', 'presidental', 'local'].includes(state.electionFamily)
+          ? state.electionFamily
+          : 'parliamentary';
+        activeParliamentaryPhase = state.parliamentaryPhase || null;
+        activePresidentialPhase = state.presidentialPhase || null;
+        activeLocalPhase = state.localPhase || null;
+        stopwatchRunning = Boolean(state.stopwatchRunning);
+        stopwatchStartedAtTs = Number(state.stopwatchStartedAt) || null;
+        stopwatchStartTs = stopwatchRunning
+          ? (stopwatchStartedAtTs || Date.now() - Math.max(0, Number(state.stopwatchElapsedMs) || 0))
+          : 0;
+        stopwatchElapsedMs = stopwatchRunning
+          ? Math.max(0, Date.now() - stopwatchStartTs)
+          : Math.max(0, Number(state.stopwatchElapsedMs) || 0);
+
+        const familyTabId = activeElectionFamily === 'presidental'
+          ? 'election-phase-tab-presidental'
+          : activeElectionFamily === 'local'
+            ? 'election-phase-tab-local'
+            : 'election-phase-tab-parliamentary';
+        activateElectionPhaseTab(familyTabId, false);
+        syncElectionPhaseControls();
+        if (stopwatchTimerId) clearInterval(stopwatchTimerId);
+        stopwatchTimerId = stopwatchRunning
+          ? setInterval(() => {
+            stopwatchElapsedMs = Date.now() - stopwatchStartTs;
+            syncStopwatchDisplay();
+          }, 1000)
+          : null;
+        updateParliamentaryViewVisibility();
+        updateBannerTitle();
+        syncStopwatchDisplay();
+        renderCoverageStatusPanel();
+        updateSidebarNavigationState();
+        if (remoteAccessMode && wasResultsLocked !== remoteResultsLocked && cachedConfig) {
+          buildSidebarMenu(cachedConfig);
+          enforceRemoteDashboardView();
+        }
+      }
+
+      async function loadSharedDashboardState() {
+        try {
+          const response = await fetch('/api/dashboard-state', { cache: 'no-store' });
+          if (response.ok) applySharedDashboardState(await response.json());
+        } catch (error) {
+          console.warn('Unable to load shared dashboard state:', error.message);
+        }
+      }
+
+      async function syncSharedDashboardState() {
+        if (!remoteAccessMode) return;
+        try {
+          const response = await fetch('/api/dashboard-state', { cache: 'no-store' });
+          if (response.ok) applySharedDashboardState(await response.json());
+        } catch (error) {
+          // The next poll will retry after temporary network interruption.
+        }
+      }
 
       function formatStopwatch(ms) {
         const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -1393,6 +1796,7 @@
           stopwatchElapsedMs = Date.now() - stopwatchStartTs;
           syncStopwatchDisplay();
         }, 1000);
+        persistSharedDashboardState();
       }
 
       function stopStopwatch() {
@@ -1406,6 +1810,7 @@
         }
         syncStopwatchDisplay();
         renderCoverageStatusPanel();
+        persistSharedDashboardState();
       }
 
       function el(tag, cls) { const e = document.createElement(tag); if (cls) e.className = cls; return e; }
@@ -4821,6 +5226,54 @@
         `;
       }
 
+      function renderSignalGroupAssignments(groups, assignedGroupIds, connected) {
+        const unassignedSelect = document.getElementById('signalUnassignedGroups');
+        const assignedSelect = document.getElementById('signalAssignedGroups');
+        if (!unassignedSelect || !assignedSelect) return;
+
+        const assigned = new Set((Array.isArray(assignedGroupIds) ? assignedGroupIds : []).map(String));
+        unassignedSelect.replaceChildren();
+        assignedSelect.replaceChildren();
+        for (const group of groups || []) {
+          const option = document.createElement('option');
+          option.value = group.id;
+          option.textContent = group.name;
+          (assigned.has(String(group.id)) ? assignedSelect : unassignedSelect).appendChild(option);
+        }
+
+        const disabled = !connected || !groups || groups.length === 0;
+        unassignedSelect.disabled = disabled;
+        assignedSelect.disabled = disabled;
+        document.getElementById('assignSignalGroupsBtn').disabled = disabled;
+        document.getElementById('unassignSignalGroupsBtn').disabled = disabled;
+      }
+
+      async function moveSignalGroupsToAssignment(assign) {
+        const unassignedSelect = document.getElementById('signalUnassignedGroups');
+        const assignedSelect = document.getElementById('signalAssignedGroups');
+        if (!unassignedSelect || !assignedSelect) return;
+
+        const source = assign ? unassignedSelect : assignedSelect;
+        const selectedIds = Array.from(source.selectedOptions, (option) => option.value);
+        if (!selectedIds.length) return;
+        const assignedIds = new Set(Array.from(assignedSelect.options, (option) => option.value));
+        for (const id of selectedIds) {
+          if (assign) assignedIds.add(id);
+          else assignedIds.delete(id);
+        }
+
+        const response = await fetch('/api/signal/assign-groups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assignedGroupIds: Array.from(assignedIds) })
+        });
+        if (!response.ok) {
+          const result = await response.json().catch(() => ({}));
+          throw new Error(result.reason || 'Could not update assigned Signal groups.');
+        }
+        await refreshSignalPanel();
+      }
+
       async function refreshSignalPanel() {
         const statusEl = document.getElementById('signalStatusBadge');
         const summaryEl = document.getElementById('signalSummary');
@@ -4838,6 +5291,10 @@
           const groupsRes = await fetch('/api/signal/groups');
           const groupsPayload = await groupsRes.json();
           const groups = Array.isArray(groupsPayload.groups) ? groupsPayload.groups : [];
+          const assignedGroupIds = Array.isArray(groupsPayload.assignedGroupIds)
+            ? groupsPayload.assignedGroupIds
+            : (status.assignedGroupIds || []);
+          renderSignalGroupAssignments(groups, assignedGroupIds, Boolean(status.connected));
 
           statusEl.textContent = status.connected ? 'Signal OK' : 'Signal offline';
           statusEl.classList.toggle('connected', Boolean(status.connected));
@@ -4912,6 +5369,9 @@
       }
 
       document.addEventListener('DOMContentLoaded', async () => {
+        await initializeAccessMode();
+        await loadSharedDashboardState();
+        if (!remoteAccessMode) setupAccessControl();
         // menu behavior
         document.querySelectorAll('.menu-item').forEach(btn => {
           btn.addEventListener('click', (e) => {
@@ -4927,26 +5387,36 @@
           });
         });
 
-        setupDebugTabs();
-        setupDebugMessageActions();
-        setupDebugMessageColumnToggles();
-        setupDebugMessageFilterControls();
-        setupDatabaseTab();
-        setupSignalMessageTabs();
-        setupSignalColumnToggles();
-        setupSignalFilterControls();
+        if (!remoteAccessMode) {
+          setupDebugTabs();
+          setupDebugMessageActions();
+          setupDebugMessageColumnToggles();
+          setupDebugMessageFilterControls();
+          setupDatabaseTab();
+          setupSignalMessageTabs();
+          setupSignalColumnToggles();
+          setupSignalFilterControls();
+        }
         setupIrregularitySelection();
         setupZapSelection();
         setupIrregularityPreviewModal();
         setupZapSplitter();
-        await refreshSignalPanel();
-        await refreshSignalMessageTables();
-        await refreshDebugValidMessageTables();
-        await refreshDebugRawMessagesTable();
+        if (!remoteAccessMode) {
+          document.getElementById('assignSignalGroupsBtn')?.addEventListener('click', () => {
+            moveSignalGroupsToAssignment(true).catch((error) => console.error(error));
+          });
+          document.getElementById('unassignSignalGroupsBtn')?.addEventListener('click', () => {
+            moveSignalGroupsToAssignment(false).catch((error) => console.error(error));
+          });
+          await refreshSignalPanel();
+          await refreshSignalMessageTables();
+          await refreshDebugValidMessageTables();
+          await refreshDebugRawMessagesTable();
+        }
         await refreshIrregularitiesTable();
         await refreshZapRecords();
         setupIrregularitiesSplitter();
-        document.getElementById('signalGroupSelect')?.addEventListener('change', async (event) => {
+        if (!remoteAccessMode) document.getElementById('signalGroupSelect')?.addEventListener('change', async (event) => {
           const groupId = event.target.value;
           if (!groupId) {
             await refreshSignalMessageTables();
@@ -4961,20 +5431,28 @@
           await refreshSignalMessageTables();
         });
         await loadConfigAndBuild();
+        enforceRemoteDashboardView();
+        syncElectionPhaseControls();
+        updateBannerTitle();
+        updateParliamentaryViewVisibility();
+        syncStopwatchDisplay();
         await refreshIrregularitiesTable();
         await refreshZapRecords();
         applyConfigHeader(cachedConfig);
         syncStopwatchDisplay();
-        await refreshSignalMessageTables();
+        if (!remoteAccessMode) await refreshSignalMessageTables();
         await loadSummary();
         await globalThis.loadResultsSummary();
         setInterval(loadSummary, 5000);
         setInterval(() => globalThis.loadResultsSummary(), 5000);
-        setInterval(refreshDebugValidMessageTables, 5000);
-        setInterval(refreshDebugRawMessagesTable, 5000);
+        if (!remoteAccessMode) {
+          setInterval(refreshDebugValidMessageTables, 5000);
+          setInterval(refreshDebugRawMessagesTable, 5000);
+        }
         setInterval(refreshIrregularitiesTable, 5000);
         setInterval(refreshZapRecords, 5000);
-        setInterval(refreshSignalPanel, 8000);
+        if (!remoteAccessMode) setInterval(refreshSignalPanel, 8000);
+        if (remoteAccessMode) setInterval(syncSharedDashboardState, 5000);
         setInterval(updateSignalCountdownDisplay, 1000);
 
         function startClock() {

@@ -49,11 +49,20 @@
       "fields": ["pairs"]
     },
     {
+      "type": "documents",
+      "name": "Dok",
+      "description": "Sends the turnout worksheet with 'Izl', the preliminary results worksheet with 'Pre', or both with 'Izl Pre'. With no parameter, sends both worksheets.",
+      "format": "Dok: [Izl][Pre]",
+      "example": "Dok: Izl (or Dok: Pre; Dok: or Dok: Izl Pre sends both)",
+      "regex": "^Dok\\s*:\\s*(?:(Izl|Pre)(?:\\s*,?\\s*(Izl|Pre))?)?\\s*$",
+      "fields": ["documentOne", "documentTwo"]
+    },
+    {
       "type": "irregularity",
       "name": "Nep",
-      "description": "Reports an irregularity with a short explanation and an attached photo.",
-      "format": "Nep: [<short explanation> + photo]",
-      "example": "Nep: Оштећен гласачки листић",
+      "description": "Reports an irregularity with optional numeric urgency, violation, and severity parameters, a short explanation, and an attached photo. Use 0 for an unset category.",
+      "format": "Nep: [<urgency 0-3> <violation 0-4> <severity 0-3> <short explanation> + photo]",
+      "example": "Nep: 1 2 3 Оштећен гласачки листић",
       "regex": "^Nep\\s*:\\s*(.*)$",
       "fields": ["explanation"]
     },

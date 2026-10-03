@@ -117,6 +117,7 @@ function applyRegistrationMessage(config, sender, placeId) {
   if (senderEntry && typeof senderEntry === 'object') {
     senderEntry.signalUser = String(sender || 'TBD');
   }
+  place.senderStatus = '1';
 
   try {
     saveConfig(config);

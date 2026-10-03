@@ -146,5 +146,27 @@ Project data cleaning and matching rules
 - Integrate a small testing harness for the scraper (unit tests for JS snippets, heuristics).
 - Add optional heuristics for operator mapping using phone-number matching from Signal groups when available.
 
+13. Local server process lifecycle
+
+- The dashboard is started with `npm start` and normally listens on `127.0.0.1:3000`.
+- Before starting another instance, check both matching processes and the listening port:
+  - `pgrep -af 'node server.js'`
+  - `ss -ltnp | grep ':3000'`
+- A process is considered residual when it belongs to this project, is no longer needed, and still owns the dashboard port after the terminal or task that started it has ended. Do not kill unrelated Node.js processes.
+- Inspect the process before stopping it:
+  - `ps -fp <PID>`
+  - `readlink -f /proc/<PID>/cwd`
+- Stop a confirmed residual process gracefully first: `kill -TERM <PID>`.
+- If `ps` shows state `T` or `Tl`, resume the stopped process before stopping it: `kill -CONT <PID>`, then `kill -TERM <PID>`.
+- Recheck with `pgrep -af 'node server.js'` and `ss -ltnp | grep ':3000'`. Use `kill -KILL <PID>` only when the confirmed process ignores `SIGTERM`.
+- Never use a broad command such as `pkill node` because it can terminate unrelated applications or development servers.
+
+14. Request-generated Signal PDF documents
+
+- Generate requested turnout and preliminary-results PDFs for the requestor's assigned voting place at request time. During debugging, preserve them directly under `data/generated_documents/` and overwrite the same filenames on each request; do not automatically delete them after sending.
+- Send PDFs only as direct Signal attachments to the requestor's sender number. Do not fall back to posting these location-specific documents into a group when a direct sender number is unavailable.
+- Use the stable turnout attachment filename `Pracenje izlaznosti na birackom mestu.pdf` for every requestor. Use a distinct stable filename for the preliminary-results form so `Dok:` can deliver both files without filename collisions.
+- Serialize PDF generation and sending when using the shared filenames, so a later request cannot overwrite a file while an earlier send is still reading it. Retain files after success or failure for debugging; remove retained debug files only when explicitly requested.
+
 
 End of rules document.
