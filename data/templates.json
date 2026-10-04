@@ -15,11 +15,20 @@
     {
       "type": "register-controller",
       "name": "Reg",
-      "description": "Queries the sender's registration, or registers a controller for a specific voting place by its numeric id.",
-      "format": "Reg: [N.N.N.N]",
-      "example": "Reg: 1.7.1.76",
-      "regex": "^Reg\\s*:\\s*([0-9]+(?:\\.[0-9]+){3})?\\s*$",
-      "fields": ["placeId"]
+      "description": "Queries the sender's registration, registers a controller with a place id, or registers a mobile team member by adding MTM.",
+      "format": "Reg: [N.N.N.N [MTM]]",
+      "example": "Reg: 1.7.1.76 MTM",
+      "regex": "^Reg\\s*:\\s*(?:([0-9]+(?:\\.[0-9]+){3})(?:\\s+(MTM))?)?\\s*$",
+      "fields": ["placeId", "registrationType"]
+    },
+    {
+      "type": "unregister",
+      "name": "Unr",
+      "description": "Unregisters the sender from their current voting place.",
+      "format": "Unr:",
+      "example": "Unr:",
+      "regex": "^Unr\\s*:\\s*$",
+      "fields": []
     },
     {
       "type": "izlaznost",
@@ -34,9 +43,9 @@
       "type": "status",
       "name": "Sta",
       "description": "Sets the senderStatus for the sender's voting place.",
-      "format": "Sta: <Akt|Gls|Prk|Bro|Prl|Zap>",
+      "format": "Sta: <Akt|Odl|Gls|Prk|Bro|Prl|Zap>",
       "example": "Sta: Akt",
-      "regex": "^Sta\\s*:\\s*(Akt|Gls|Prk|Bro|Prl|Zap)\\s*$",
+      "regex": "^Sta\\s*:\\s*(Akt|Odl|Gls|Prk|Bro|Prl|Zap)\\s*$",
       "fields": ["statusCode"]
     },
     {

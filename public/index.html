@@ -122,6 +122,7 @@
                       <th id="irregularitiesTimeHeader">Time</th>
                       <th id="irregularitiesPlaceHeader">Voting place</th>
                       <th id="irregularitiesExplanationHeader">Explanation</th>
+                      <th id="irregularitiesApprovedHeader">Approved</th>
                     </tr>
                   </thead>
                   <tbody id="irregularitiesBody"></tbody>
@@ -155,7 +156,7 @@
         <section id="panel-debug" class="panel" style="display:none">
           <div class="box">
             <div class="debug-tabs" role="tablist" aria-label="Debug tabs">
-              <button type="button" class="debug-tab-btn active" data-debug-tab="debug-tab-settings" role="tab" aria-selected="true">Podesavanja</button>
+              <button type="button" class="debug-tab-btn active" data-debug-tab="debug-tab-settings" role="tab" aria-selected="true">Подешавања</button>
               <button type="button" class="debug-tab-btn" data-debug-tab="debug-tab-main" role="tab" aria-selected="false">Debug</button>
               <button type="button" class="debug-tab-btn" data-debug-tab="debug-tab-access-control" role="tab" aria-selected="false">Контрола приступа</button>
             </div>
@@ -164,6 +165,7 @@
               <div class="debug-main-tabs" role="tablist" aria-label="Debug message tabs">
                 <button type="button" class="debug-main-tab-btn active" data-debug-main-tab="debug-main-tab-message" role="tab" aria-selected="true">Message</button>
                 <button type="button" class="debug-main-tab-btn" data-debug-main-tab="debug-main-tab-in-progress" role="tab" aria-selected="false">In Progress</button>
+                <button type="button" class="debug-main-tab-btn" data-debug-main-tab="debug-main-tab-remote-connections" role="tab" aria-selected="false">Remote Connections</button>
                 <button type="button" class="debug-main-tab-btn" data-debug-main-tab="debug-main-tab-database" role="tab" aria-selected="false">Data Base</button>
               </div>
 
@@ -275,6 +277,27 @@
                 </div>
               </div>
 
+              <div id="debug-main-tab-remote-connections" class="debug-main-tab-panel" role="tabpanel">
+                <div class="signal-message-table-wrap">
+                  <table class="signal-message-table remote-connections-table" style="width:100%">
+                    <thead>
+                      <tr>
+                        <th id="remoteConnectionRequestedHeader">Requested</th>
+                        <th id="remoteConnectionIpHeader">IP address</th>
+                        <th id="remoteConnectionDeviceHeader">Device</th>
+                        <th id="remoteConnectionRoleHeader">Role</th>
+                        <th id="remoteConnectionStatusHeader">Status</th>
+                        <th id="remoteConnectionStartedHeader">Started</th>
+                        <th id="remoteConnectionStartedByHeader">Started by</th>
+                        <th id="remoteConnectionEndedHeader">Ended</th>
+                        <th id="remoteConnectionEndedByHeader">Terminated by</th>
+                      </tr>
+                    </thead>
+                    <tbody id="remoteConnectionsBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
               <div id="debug-main-tab-database" class="debug-main-tab-panel" role="tabpanel">
                 <div style="margin-top:8px;">
                   <button id="dbClearDataBtn" type="button" style="margin-bottom:14px;">Clear Data</button>
@@ -316,6 +339,10 @@
                       <input type="checkbox" id="dbClearZapRecords" class="db-clear-item">
                       <span id="dbClearZapRecordsLabel">Delete All Polling Station Records</span>
                     </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="dbClearRemoteConnections" class="db-clear-item">
+                      <span id="dbClearRemoteConnectionsLabel">Delete Remote Session Logins</span>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -324,16 +351,25 @@
 
             <div id="debug-tab-access-control" class="debug-tab-panel" role="tabpanel">
               <section class="access-control-panel">
+                <div class="access-server-address">
+                  <h3 id="accessServerAddressTitle">Локална адреса сервера</h3>
+                  <p id="accessServerAddressHint">На телефону повезаном на исту мрежу отворите једну од адреса:</p>
+                  <div id="accessServerAddresses" class="access-server-addresses" aria-live="polite"></div>
+                </div>
                 <h3 id="accessRequestsTitle">Захтеви за приступ</h3>
-                <table class="access-control-table">
-                  <thead><tr><th id="accessRequestsIpHeader">IP адреса</th><th id="accessRequestedAtHeader">Време захтева</th><th id="accessDeviceHeader">Уређај</th><th id="accessDecisionHeader">Одлука</th></tr></thead>
-                  <tbody id="accessRequestsBody"></tbody>
-                </table>
+                <div class="access-control-table-wrap">
+                  <table class="access-control-table access-requests-table">
+                    <thead><tr><th id="accessRequestsIpHeader">IP адреса</th><th id="accessRequestedAtHeader">Време захтева</th><th id="accessDeviceHeader">Уређај</th><th id="accessDecisionHeader">Одлука</th></tr></thead>
+                    <tbody id="accessRequestsBody"></tbody>
+                  </table>
+                </div>
                 <h3 id="accessSessionsTitle">Активне сесије</h3>
-                <table class="access-control-table">
-                  <thead><tr><th id="accessSessionsIpHeader">IP адреса</th><th id="accessSessionDeviceHeader">Уређај</th><th id="accessApprovedAtHeader">Одобрено</th><th id="accessLastActivityHeader">Последња активност</th><th id="accessExpiresHeader">Истиче</th><th></th></tr></thead>
-                  <tbody id="accessSessionsBody"></tbody>
-                </table>
+                <div class="access-control-table-wrap">
+                  <table class="access-control-table access-sessions-table">
+                    <thead><tr><th id="accessSessionsIpHeader">IP адреса</th><th id="accessSessionDeviceHeader">Уређај</th><th id="accessSessionRoleHeader">Улога</th><th id="accessApprovedAtHeader">Одобрено</th><th id="accessLastActivityHeader">Последња активност</th><th id="accessExpiresHeader">Истиче</th><th></th></tr></thead>
+                    <tbody id="accessSessionsBody"></tbody>
+                  </table>
+                </div>
                 <div id="accessControlStatus" class="small" aria-live="polite"></div>
               </section>
             </div>
@@ -373,13 +409,6 @@
                     <label class="signal-group-list-column">
                       <span>Додељене групе</span>
                       <select id="signalAssignedGroups" multiple size="7" aria-label="Додељене групе"></select>
-                    </label>
-                  </div>
-
-                  <div class="signal-controls">
-                    <label>
-                      <span id="signalGroupLabel">Група за преглед порука</span>
-                      <select id="signalGroupSelect"></select>
                     </label>
                   </div>
 
@@ -571,11 +600,19 @@
     </div>
 
     <dialog id="accessRequestDialog" class="access-request-dialog">
-      <h2 id="accessRequestDialogTitle">Нови захтев за приступ</h2>
+      <div class="access-request-dialog-header">
+        <h2 id="accessRequestDialogTitle">Нови захтев за приступ</h2>
+        <button id="accessRequestDialogCloseX" class="access-request-dialog-close" type="button" aria-label="Затвори прозор" title="Затвори прозор">×</button>
+      </div>
       <p id="accessRequestDialogDetails"></p>
       <div id="accessRequestDecisionActions" class="access-dialog-actions">
+        <select id="accessRoleSelect" aria-label="Улога удаљеног тима">
+          <option value="">Изаберите улогу</option>
+          <option value="media">Медијски тим</option>
+          <option value="lawyer">Правни тим</option>
+        </select>
         <button id="accessDialogRejectBtn" class="secondary" type="button">Одбиј</button>
-        <button id="accessDialogApproveBtn" type="button">Одобри</button>
+        <button id="accessDialogApproveBtn" type="button" disabled>Одобри</button>
       </div>
       <div id="accessApprovalCodePanel" hidden>
         <p id="accessApprovalCodeLabel">Доставите овај једнократни код кориснику:</p>

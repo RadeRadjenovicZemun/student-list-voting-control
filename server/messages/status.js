@@ -1,6 +1,6 @@
-const { getI18nUiString, fillTemplate } = require('../config');
+const { getI18nUiString, loadI18n, fillTemplate } = require('../config');
 
-const STATUS_CODE_MAP = { Akt: '1', Gls: '2', Prk: '3', Bro: '4', Prl: '5', Zap: '6' };
+const STATUS_CODE_MAP = { Akt: '1', Odl: '7', Gls: '2', Prk: '3', Bro: '4', Prl: '5', Zap: '6' };
 
 function normalizeStatusCode(code) {
   const raw = String(code || '').trim();
@@ -12,8 +12,8 @@ function buildStatusAcceptedReply(senderCfg, statusCode, options = {}) {
   const prependRecipientName = Boolean(options.prependRecipientName);
   const recipientName = String(options.recipientName || '').trim();
   const template = getI18nUiString('sr', 'signalStatusAcceptedReply', 'Статус бирачког места {location} је промењен у: {statusLabel}.');
-  const srUi = { signalStatusLabels: {} };
-  const statusLabels = srUi.signalStatusLabels || {};
+  const i18n = loadI18n();
+  const statusLabels = i18n.multiLanguage?.sr?.ui?.signalStatusLabels || {};
   const numericId = STATUS_CODE_MAP[statusCode] || statusCode;
   const statusLabel = statusLabels[numericId] || statusCode;
   const placeName = String(senderCfg.place || '').trim();

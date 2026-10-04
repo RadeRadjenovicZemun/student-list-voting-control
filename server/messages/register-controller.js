@@ -42,19 +42,24 @@ function findSenderRegistration(config, sender) {
   const normalizedSender = String(sender || '').trim().toLowerCase();
   if (!normalizedSender) return null;
 
-  const getFromPlaces = (places, regionName, municipalityName) => {
-    for (const place of places || []) {
-      const senderEntry = Array.isArray(place.sender) ? place.sender[0] : null;
-      if (senderEntry && String(senderEntry.signalUser || '').trim().toLowerCase() === normalizedSender) {
-        return { placeId: String(place.id || ''), placeName: String(place.name || place.id || ''), regionName, municipalityName, registeredVoters: Number(place.registeredVoters) || 0 };
-      }
-      for (const sub of place.subPlaces || []) {
-        const subEntry = Array.isArray(sub.sender) ? sub.sender[0] : null;
-        if (subEntry && String(subEntry.signalUser || '').trim().toLowerCase() === normalizedSender) {
-          return { placeId: String(sub.id || ''), placeName: String(sub.name || sub.id || ''), regionName, municipalityName, registeredVoters: Number(sub.registeredVoters) || 0 };
-        }
-      }
-    }
+  const matchPlace = (place, regionName, municipalityName, parentPlace = null) => {
+    if (!place || typeof place !== 'object') return null;
+    const context = {
+      placeId: String(place.id || ''),
+      placeName: String(place.name || place.id || ''),
+      regionName,
+      municipalityName,
+      parentPlace: parentPlace && parentPlace.name ? String(parentPlace.name) : null,
+      registeredVoters: Number(place.registeredVoters) || 0
+    };
+    const controller = (Array.isArray(place.sender) ? place.sender : []).find((entry) =>
+      String(entry && entry.signalUser || '').trim().toLowerCase() === normalizedSender
+    );
+    if (controller) return { ...context, sender: controller, registrationType: 'controller' };
+    const mobileTeamMember = (Array.isArray(place.mobileTeamMembers) ? place.mobileTeamMembers : []).find((entry) =>
+      String(entry && entry.signalUser || '').trim().toLowerCase() === normalizedSender
+    );
+    if (mobileTeamMember) return { ...context, sender: mobileTeamMember, registrationType: 'mtm' };
     return null;
   };
 
@@ -63,18 +68,32 @@ function findSenderRegistration(config, sender) {
     if (Array.isArray(region.municipalities)) {
       for (const mun of region.municipalities) {
         const municipalityName = mun && mun.name ? String(mun.name) : null;
-        const found = getFromPlaces(mun.places, regionName, municipalityName);
-        if (found) return found;
+        for (const place of mun.places || []) {
+          const found = matchPlace(place, regionName, municipalityName);
+          if (found) return found;
+          for (const sub of place.subPlaces || []) {
+            const subFound = matchPlace(sub, regionName, municipalityName, place);
+            if (subFound) return subFound;
+          }
+        }
       }
     }
-    const found = getFromPlaces(region.places, regionName, null);
-    if (found) return found;
+    for (const place of region.places || []) {
+      const found = matchPlace(place, regionName, null);
+      if (found) return found;
+      for (const sub of place.subPlaces || []) {
+        const subFound = matchPlace(sub, regionName, null, place);
+        if (subFound) return subFound;
+      }
+    }
   }
 
   return null;
 }
 
-function applyRegistrationMessage(config, sender, placeId) {
+function applyRegistrationMessage(config, sender, placeId, options = {}) {
+  const registrationType = options.registrationType === 'mtm' ? 'mtm' : 'controller';
+  const persist = options.saveConfig || saveConfig;
   const context = findVotingPlaceContextById(config, placeId);
   if (!context || !context.place) {
     return { ok: false, reason: 'place-not-found' };
@@ -83,12 +102,12 @@ function applyRegistrationMessage(config, sender, placeId) {
   const place = context.place;
   const existingReg = findSenderRegistration(config, sender);
   if (existingReg) {
-    return { ok: false, reason: 'sender-already-registered', existingReg };
+    return { ok: false, reason: 'sender-already-registered', existingReg, registrationType: existingReg.registrationType };
   }
 
   const currentSenderEntry = Array.isArray(place.sender) ? place.sender[0] : null;
   const currentSignalUser = currentSenderEntry ? String(currentSenderEntry.signalUser || '').trim() : '';
-  if (currentSignalUser && currentSignalUser !== 'TBD') {
+  if (registrationType === 'controller' && currentSignalUser && currentSignalUser !== 'TBD') {
     return {
       ok: false,
       reason: 'place-already-taken',
@@ -101,7 +120,10 @@ function applyRegistrationMessage(config, sender, placeId) {
     };
   }
 
-  if (!Array.isArray(place.sender) || !place.sender.length) {
+  if (registrationType === 'mtm') {
+    if (!Array.isArray(place.mobileTeamMembers)) place.mobileTeamMembers = [];
+    place.mobileTeamMembers.push({ signalUser: String(sender || 'TBD'), registrationType: 'mtm' });
+  } else if (!Array.isArray(place.sender) || !place.sender.length) {
     place.sender = [{
       signalUser: 'TBD',
       displayName: 'TBD',
@@ -113,16 +135,19 @@ function applyRegistrationMessage(config, sender, placeId) {
     }];
   }
 
-  const senderEntry = place.sender[0];
-  if (senderEntry && typeof senderEntry === 'object') {
-    senderEntry.signalUser = String(sender || 'TBD');
+  if (registrationType === 'controller') {
+    const senderEntry = place.sender[0];
+    if (senderEntry && typeof senderEntry === 'object') {
+      senderEntry.signalUser = String(sender || 'TBD');
+    }
+    place.senderStatus = '0';
   }
-  place.senderStatus = '1';
 
   try {
-    saveConfig(config);
+    persist(config);
     return {
       ok: true,
+      registrationType,
       placeId: String(placeId),
       sender: String(sender || 'TBD'),
       regionName: context.regionName || null,
@@ -136,10 +161,42 @@ function applyRegistrationMessage(config, sender, placeId) {
   }
 }
 
+function unregisterSender(config, sender, options = {}) {
+  const persist = options.saveConfig || saveConfig;
+  const registration = findSenderRegistration(config, sender);
+  if (!registration) return { ok: false, reason: 'sender-not-registered' };
+  const context = findVotingPlaceContextById(config, registration.placeId);
+  if (!context || !context.place) return { ok: false, reason: 'place-not-found' };
+
+  if (registration.registrationType === 'mtm') {
+    context.place.mobileTeamMembers = (context.place.mobileTeamMembers || []).filter((entry) =>
+      String(entry && entry.signalUser || '').trim().toLowerCase() !== String(sender || '').trim().toLowerCase()
+    );
+  } else {
+    const entry = (context.place.sender || []).find((item) =>
+      String(item && item.signalUser || '').trim().toLowerCase() === String(sender || '').trim().toLowerCase()
+    );
+    if (entry) entry.signalUser = 'TBD';
+    context.place.senderStatus = '0';
+  }
+
+  try {
+    persist(config);
+    return { ok: true, ...registration };
+  } catch (err) {
+    console.error('Failed to save config after unregistration:', err.message);
+    return { ok: false, reason: 'config-save-failed' };
+  }
+}
+
+function isMtmCommandAllowed(commandType) {
+  return commandType === 'irregularity';
+}
+
 function buildRegistrationAcceptedReply(registration, options = {}) {
   const prependRecipientName = Boolean(options.prependRecipientName);
   const recipientName = String(options.recipientName || '').trim();
-  const template = getI18nUiString('sr', 'signalRegistrationAcceptedReply', 'Регистровани сте као контролор на бирачком месту,\n"{placeName}".\nБрој регистрованих бирача је {registeredVoters}.');
+  const template = getI18nUiString('sr', registration.registrationType === 'mtm' ? 'signalMtmRegistrationAcceptedReply' : 'signalRegistrationAcceptedReply', 'Регистровани сте као контролор на бирачком месту,\n"{placeName}".\nБрој регистрованих бирача је {registeredVoters}.');
   const placeName = String(registration.placeName || registration.placeId || 'N/A');
   const municipalityName = String(registration.municipalityName || '').trim();
   const regionName = String(registration.regionName || '').trim();
@@ -173,7 +230,7 @@ function buildRegistrationAcceptedReply(registration, options = {}) {
 function buildRegistrationQueryReply(registration, options = {}) {
   const prependRecipientName = Boolean(options.prependRecipientName);
   const recipientName = String(options.recipientName || '').trim();
-  const template = getI18nUiString('sr', 'signalRegistrationQueryReply',
+  const template = getI18nUiString('sr', registration && registration.registrationType === 'mtm' ? 'signalMtmRegistrationQueryReply' : 'signalRegistrationQueryReply',
     'Регистровани сте као контролор на бирачком месту,\n"{placeName}".\nБрој регистрованих бирача је {registeredVoters}.');
   const baseMessage = fillTemplate(template, {
     placeName: String(registration && registration.placeName || registration && registration.placeId || 'N/A'),
@@ -188,5 +245,7 @@ module.exports = {
   applyRegistrationMessage,
   buildRegistrationAcceptedReply,
   buildRegistrationQueryReply,
-  findSenderRegistration
+  findSenderRegistration,
+  unregisterSender,
+  isMtmCommandAllowed
 };

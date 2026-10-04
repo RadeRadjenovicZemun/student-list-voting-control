@@ -9,6 +9,11 @@ const {
   SESSION_MAX_AGE_MS,
   MAX_CODE_ATTEMPTS
 } = require('../server/access-control');
+const {
+  canAccessVotingRecords,
+  canApproveIrregularities,
+  projectMediaIrregularities
+} = require('../server/access-policy');
 
 function createFixture() {
   let now = 1_000_000;
@@ -46,6 +51,8 @@ test('approval code is IP-bound, one-time, and creates a renewable session', () 
   const verified = access.verifyCode(requestId, '192.168.0.10', approval.code);
   assert.equal(verified.ok, true);
   assert.equal(access.listSessions()[0].userAgent, 'Test browser');
+  assert.equal(access.listSessions()[0].role, 'lawyer');
+  assert.equal(access.authenticate(verified.token, '192.168.0.10').role, 'lawyer');
   assert.ok(access.authenticate(verified.token, '192.168.0.10'));
   assert.equal(access.verifyCode(requestId, '192.168.0.10', approval.code).ok, false);
 
@@ -56,6 +63,50 @@ test('approval code is IP-bound, one-time, and creates a renewable session', () 
   assert.equal(access.heartbeat(verified.token, '192.168.0.10').renewRequired, true);
   assert.ok(access.renewSession(verified.token, '192.168.0.10'));
   assert.equal(access.authenticate(verified.token, '192.168.0.10').renewRequired, false);
+});
+
+test('approved Media Team request preserves its role in the authenticated session', () => {
+  const { access } = createFixture();
+  const requestId = access.createRequest('192.168.0.15', 'Media browser');
+  access.approveRequest(requestId, undefined, 'media');
+
+  const verified = access.verifyCode(requestId, '192.168.0.15', '123456');
+  assert.equal(verified.ok, true);
+  assert.equal(access.authenticate(verified.token, '192.168.0.15').role, 'media');
+  assert.equal(access.listSessions()[0].role, 'media');
+});
+
+test('approval rejects unknown remote roles', () => {
+  const { access } = createFixture();
+  const requestId = access.createRequest('192.168.0.16');
+  assert.equal(access.approveRequest(requestId, undefined, 'admin'), null);
+  assert.equal(access.getRequestStatus(requestId, '192.168.0.16').status, 'pending');
+});
+
+test('Media policy hides voting records and requires Lawyer approval remotely', () => {
+  assert.equal(canAccessVotingRecords('media'), false);
+  assert.equal(canAccessVotingRecords('lawyer'), true);
+  assert.equal(canApproveIrregularities(true, 'media'), false);
+  assert.equal(canApproveIrregularities(true, 'lawyer'), true);
+  assert.equal(canApproveIrregularities(false, null), true);
+});
+
+test('Media irregularity projection reveals all location counts but only approved records', () => {
+  const records = [
+    { id: 'approved', approved: true, region: 'North', municipality: 'A', place: '1' },
+    { id: 'pending-a', region: 'North', municipality: 'A', place: '1', explanation: 'private' },
+    { id: 'pending-b', region: 'South', municipality: 'B', place: '2', sender: 'private' }
+  ];
+  const projection = projectMediaIrregularities(records);
+
+  assert.deepEqual(projection.records.map((record) => record.id), ['approved']);
+  assert.deepEqual(projection.counts, {
+    all: 3,
+    region: { North: 2, South: 1 },
+    municipality: { A: 2, B: 1 },
+    place: { '1': 2, '2': 1 }
+  });
+  assert.equal(JSON.stringify(projection).includes('private'), false);
 });
 
 test('reloading a waiting page reuses the same IP request', () => {
@@ -106,6 +157,7 @@ test('operator revocation invalidates the token and preserves a revoked marker',
   const verified = access.verifyCode(requestId, '192.168.0.10', '123456');
   assert.equal(access.revokeSessionByRequestId(requestId), true);
   assert.equal(access.authenticate(verified.token, '192.168.0.10'), null);
+  assert.equal(access.heartbeat(verified.token, '192.168.0.10'), null);
   assert.equal(access.isRevoked(verified.token, '192.168.0.10'), true);
   assert.equal(access.isRevoked(verified.token, '192.168.0.11'), false);
 });

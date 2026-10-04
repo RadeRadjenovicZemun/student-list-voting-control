@@ -108,7 +108,7 @@ async function main() {
       });
       const __DEMO_WRITE_PATHS__ = new Set([
         '/api/config/clear-data', '/api/irregularities', '/api/zap-records',
-        '/api/signal/raw-messages', '/api/messages/delete-selected', '/api/signal/select-group'
+        '/api/signal/raw-messages', '/api/messages/delete-selected'
       ]);
       function __demoResponse__(body, status) {
         return Promise.resolve({

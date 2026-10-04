@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const { exec, spawn } = require('child_process');
 const net = require('net');
@@ -12,6 +13,13 @@ const {
   isPrivateLanAddress,
   SESSION_MAX_AGE_MS
 } = require('./server/access-control');
+const {
+  canAccessVotingRecords,
+  canApproveIrregularities,
+  isMediaRole,
+  projectMediaIrregularities
+} = require('./server/access-policy');
+const { createRemoteConnectionHistory } = require('./server/remote-connection-history');
 
 const app = express();
 app.use(express.json());
@@ -21,6 +29,13 @@ const ACCESS_REQUEST_COOKIE = 'votingAccessRequest';
 
 function getClientIp(req) {
   return String(req.socket && req.socket.remoteAddress || req.ip || '').replace(/^::ffff:/i, '');
+}
+
+function getServerLanAddresses() {
+  const addresses = Object.values(os.networkInterfaces()).flatMap((interfaces) => interfaces || [])
+    .filter((entry) => !entry.internal && isPrivateLanAddress(entry.address))
+    .map((entry) => entry.address);
+  return [...new Set(addresses)].sort();
 }
 
 function getCookie(req, name) {
@@ -51,13 +66,16 @@ function clearAccessCookie(res, name) {
 function localOnlyEndpoint(req) {
   const pathname = req.path;
   if (pathname.startsWith('/api/access/requests') || pathname.startsWith('/api/access/sessions')) return true;
+  if (pathname.startsWith('/api/access/history')) return true;
   if (pathname === '/api/dashboard-state' && req.method !== 'GET') return true;
   if (pathname === '/api/config/clear-data') return true;
   if (pathname === '/api/messages' || pathname.startsWith('/api/messages/')) return true;
   if (pathname.startsWith('/api/signal/')) return true;
   if (pathname === '/api/signal') return true;
   if (pathname === '/api/signal/raw-messages') return true;
-  if ((pathname === '/api/irregularities' || pathname.startsWith('/api/irregularities/')) && req.method !== 'GET') return true;
+  if ((pathname === '/api/irregularities' || pathname.startsWith('/api/irregularities/')) && req.method !== 'GET') {
+    return !(req.method === 'POST' && /^\/api\/irregularities\/[^/]+\/approval$/.test(pathname));
+  }
   if ((pathname === '/api/zap-records' || pathname.startsWith('/api/zap-records/')) && req.method !== 'GET') return true;
   return false;
 }
@@ -88,6 +106,9 @@ const IRREGULARITIES_PATH = path.join(DATA_DIR, 'irregularities.json');
 const IRREGULARITIES_MEDIA_DIR = path.join(DATA_DIR, 'irregularities');
 const ZAP_RECORDS_PATH = path.join(DATA_DIR, 'zap_records.json');
 const ZAP_MEDIA_DIR = path.join(DATA_DIR, 'zap_records');
+const REMOTE_CONNECTIONS_PATH = path.join(DATA_DIR, 'remote_connections.json');
+const remoteConnectionHistory = createRemoteConnectionHistory(REMOTE_CONNECTIONS_PATH);
+remoteConnectionHistory.closeOpenConnections();
 
 function getRemoteRequestId(req) {
   return getCookie(req, ACCESS_REQUEST_COOKIE);
@@ -98,6 +119,7 @@ function ensureRemoteAccessRequest(req, res) {
   const status = requestId ? remoteAccess.getRequestStatus(requestId, getClientIp(req)).status : 'expired';
   if (!requestId || ['expired', 'rejected', 'locked'].includes(status)) {
     requestId = remoteAccess.createRequest(getClientIp(req), req.headers['user-agent'] || '');
+    remoteConnectionHistory.recordRequest({ requestId, ip: getClientIp(req), userAgent: req.headers['user-agent'] || '' });
     setAccessCookie(res, ACCESS_REQUEST_COOKIE, requestId, 10 * 60);
     try {
       const notification = spawn('notify-send', [
@@ -122,7 +144,10 @@ function requireLocalOperator(req, res) {
 app.get('/access/status', (req, res) => {
   if (!isPrivateLanAddress(getClientIp(req))) return res.status(403).json({ status: 'lan-only' });
   const requestId = getRemoteRequestId(req);
-  res.json(remoteAccess.getRequestStatus(requestId, getClientIp(req)));
+  const result = remoteAccess.getRequestStatus(requestId, getClientIp(req));
+  if (result.status === 'expired') remoteConnectionHistory.endSession(requestId, 'expired', 'System (request or PIN expired)');
+  if (result.status === 'locked') remoteConnectionHistory.endSession(requestId, 'locked', 'System (too many PIN attempts)');
+  res.json(result);
 });
 
 app.post('/access/verify', (req, res) => {
@@ -132,6 +157,7 @@ app.post('/access/verify', (req, res) => {
     const status = result.reason === 'invalid-code' ? 400 : (result.reason === 'too-many-attempts' ? 429 : 410);
     return res.status(status).json({ error: result.reason });
   }
+  remoteConnectionHistory.startSession(result.requestId, result.role);
   setAccessCookie(res, REMOTE_ACCESS_COOKIE, result.token, Math.ceil(SESSION_MAX_AGE_MS / 1000));
   clearAccessCookie(res, ACCESS_REQUEST_COOKIE);
   res.json({ ok: true });
@@ -146,6 +172,11 @@ app.post('/access/heartbeat', (req, res) => {
   }
   const session = remoteAccess.heartbeat(token, getClientIp(req));
   if (!session) {
+    const expired = remoteAccess.consumeExpiredSession(token, getClientIp(req));
+    if (expired) {
+      const reason = expired.reason === 'idle-timeout' ? 'session idle timeout' : 'maximum session duration reached';
+      remoteConnectionHistory.endSession(expired.requestId, 'expired', `System (${reason})`);
+    }
     clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
     return res.status(401).json({ error: 'session-expired' });
   }
@@ -165,9 +196,16 @@ app.post('/access/renew', (req, res) => {
 });
 
 app.post('/access/logout', (req, res) => {
-  remoteAccess.revokeSession(getCookie(req, REMOTE_ACCESS_COOKIE), getClientIp(req));
+  const token = getCookie(req, REMOTE_ACCESS_COOKIE);
+  const session = remoteAccess.getSessionDetails(token, getClientIp(req));
+  remoteAccess.revokeSession(token, getClientIp(req));
+  if (session) remoteConnectionHistory.endSession(session.requestId, 'logged-out', 'Remote user');
   clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
   res.json({ ok: true });
+});
+
+app.get('/access/logout', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'access-logged-out.html'));
 });
 
 app.get('/access/revoked', (req, res) => {
@@ -179,16 +217,25 @@ app.get('/api/access/requests', (req, res) => {
   res.json({ requests: remoteAccess.listRequests().filter((request) => ['pending', 'approved'].includes(request.status)) });
 });
 
+app.get('/api/access/server-address', (req, res) => {
+  if (!requireLocalOperator(req, res)) return;
+  res.json({ addresses: getServerLanAddresses(), port: PORT });
+});
+
 app.post('/api/access/requests/:id/approve', (req, res) => {
   if (!requireLocalOperator(req, res)) return;
-  const approval = remoteAccess.approveRequest(req.params.id);
+  const role = String(req.body && req.body.role || '');
+  if (!['media', 'lawyer'].includes(role)) return res.status(400).json({ error: 'invalid-role' });
+  const approval = remoteAccess.approveRequest(req.params.id, undefined, role);
   if (!approval) return res.status(409).json({ error: 'request-not-pending-or-expired' });
+  remoteConnectionHistory.assignRole(req.params.id, role);
   res.json(approval);
 });
 
 app.post('/api/access/requests/:id/reject', (req, res) => {
   if (!requireLocalOperator(req, res)) return;
   if (!remoteAccess.rejectRequest(req.params.id)) return res.status(409).json({ error: 'request-not-pending-or-expired' });
+  remoteConnectionHistory.endSession(req.params.id, 'rejected', 'Local operator');
   res.json({ ok: true });
 });
 
@@ -197,9 +244,23 @@ app.get('/api/access/sessions', (req, res) => {
   res.json({ sessions: remoteAccess.listSessions() });
 });
 
+app.get('/api/access/history', (req, res) => {
+  if (!requireLocalOperator(req, res)) return;
+  res.json(remoteConnectionHistory.list());
+});
+
+app.delete('/api/access/history', (req, res) => {
+  if (!requireLocalOperator(req, res)) return;
+  const removed = remoteConnectionHistory.clear();
+  res.json({ ok: true, removed });
+});
+
 app.delete('/api/access/sessions/:id', (req, res) => {
   if (!requireLocalOperator(req, res)) return;
-  res.json({ ok: remoteAccess.revokeSessionByRequestId(req.params.id) });
+  const session = remoteAccess.listSessions().find((item) => item.id === String(req.params.id));
+  const ok = remoteAccess.revokeSessionByRequestId(req.params.id);
+  if (ok && session) remoteConnectionHistory.endSession(session.id, 'revoked', 'Local operator');
+  res.json({ ok });
 });
 
 app.use((req, res, next) => {
@@ -213,8 +274,8 @@ app.use((req, res, next) => {
 
   const sessionToken = getCookie(req, REMOTE_ACCESS_COOKIE);
   if (remoteAccess.isRevoked(sessionToken, ip)) {
-    clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
     if (req.path.startsWith('/api/')) return res.status(403).json({ error: 'access-revoked' });
+    clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
     return res.sendFile(path.join(__dirname, 'public', 'access-revoked.html'));
   }
 
@@ -222,8 +283,15 @@ app.use((req, res, next) => {
   if (session) {
     req.remoteAccess = true;
     req.remoteAccessSession = session;
+    req.remoteAccessRole = session.role;
     res.setHeader('X-Access-Role', 'remote');
     return next();
+  }
+
+  const expired = remoteAccess.consumeExpiredSession(sessionToken, ip);
+  if (expired) {
+    const reason = expired.reason === 'idle-timeout' ? 'session idle timeout' : 'maximum session duration reached';
+    remoteConnectionHistory.endSession(expired.requestId, 'expired', `System (${reason})`);
   }
 
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'access-approval-required' });
@@ -232,7 +300,11 @@ app.use((req, res, next) => {
 });
 
 app.get('/api/access/session', (req, res) => {
-  res.json({ remoteAccess: Boolean(req.remoteAccess), renewRequired: Boolean(req.remoteAccessSession && req.remoteAccessSession.renewRequired) });
+  res.json({
+    remoteAccess: Boolean(req.remoteAccess),
+    role: req.remoteAccessRole || null,
+    renewRequired: Boolean(req.remoteAccessSession && req.remoteAccessSession.renewRequired)
+  });
 });
 
 function toNumber(value, fallback = 0) {
@@ -708,7 +780,6 @@ function defaultSignalConfig() {
   return {
     enabled: true,
     connected: false,
-    selectedGroupId: null,
     assignedGroupIds: [],
     groups: [],
     lastCheck: null,
@@ -740,18 +811,14 @@ function loadSignalConfig() {
     const fallback = defaultSignalConfig();
 
     const groups = normalizeSignalGroups(parsed.groups) || fallback.groups;
-    const selectedGroupId = parsed.selectedGroupId && groups.some(group => group.id === parsed.selectedGroupId)
-      ? parsed.selectedGroupId
-      : null;
     const configuredAssignedIds = Array.isArray(parsed.assignedGroupIds)
       ? parsed.assignedGroupIds
-      : (selectedGroupId ? [selectedGroupId] : []);
+      : (parsed.selectedGroupId && groups.some((group) => group.id === parsed.selectedGroupId) ? [parsed.selectedGroupId] : []);
     const assignedGroupIds = normalizeAssignedSignalGroupIds(configuredAssignedIds, groups);
 
     return {
       enabled: parsed.enabled !== false,
       connected: Boolean(parsed.connected),
-      selectedGroupId,
       assignedGroupIds,
       groups,
       lastCheck: parsed.lastCheck || null,
@@ -1109,6 +1176,8 @@ async function sendSignalReply({ groupId, recipientNumber, messageText, attachme
 const buildRegistrationAcceptedReply = (...args) => messageModules.registerController.buildRegistrationAcceptedReply(...args);
 const buildRegistrationQueryReply = (...args) => messageModules.registerController.buildRegistrationQueryReply(...args);
 const findRegisteredController = (...args) => messageModules.registerController.findSenderRegistration(...args);
+const unregisterSender = (...args) => messageModules.registerController.unregisterSender(...args);
+const isMtmCommandAllowed = (...args) => messageModules.registerController.isMtmCommandAllowed(...args);
 
 const buildIzlaznostAcceptedReply = (...args) => messageModules.izlaznost.buildIzlaznostAcceptedReply(...args);
 const buildIzlaznostQueryReply = (...args) => messageModules.izlaznost.buildIzlaznostQueryReply(...args);
@@ -1135,13 +1204,24 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
     if (!senderCfg) {
       return { accepted: false, reason: 'sender-not-allowed' };
     }
+    if (senderCfg.registrationType === 'mtm') {
+      const replyText = getI18nUiString('sr', 'signalMtmCommandRestrictedReply', 'Као члан мобилног тима можете користити само команду Nep.');
+      if (senderNumber || groupId) await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
+      return { accepted: false, reason: 'mtm-command-not-allowed' };
+    }
     return { accepted: false, reason: 'no-template-match' };
   }
 
   if (matched.type === 'register-controller') {
     const placeId = String(matched.fields.placeId || '').trim();
+    const registrationType = String(matched.fields.registrationType || '').toUpperCase() === 'MTM' ? 'mtm' : 'controller';
     if (!placeId) {
       const registration = findRegisteredController(config, sender);
+      if (registration && registration.registrationType === 'mtm') {
+        const replyText = getI18nUiString('sr', 'signalMtmCommandRestrictedReply', 'Као члан мобилног тима можете користити само команду Nep.');
+        if (senderNumber || groupId) await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
+        return { accepted: false, reason: 'mtm-command-not-allowed' };
+      }
       const i18n = config.multiLanguage || {};
       const templateKey = registration
         ? 'signalRegistrationQueryReply'
@@ -1163,7 +1243,7 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
       }
       return { accepted: Boolean(registration), queryOnly: true, registered: Boolean(registration) };
     }
-    const registration = applyRegistrationMessage(config, sender, placeId);
+    const registration = applyRegistrationMessage(config, sender, placeId, { registrationType });
     if (!registration.ok) {
       console.warn('Registration failed:', registration.reason, 'placeId=', placeId, 'sender=', sender);
       const i18n = config.multiLanguage || {};
@@ -1183,9 +1263,15 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
         const location = locationParts.join(', ');
 
         if (registration.reason === 'sender-already-registered') {
+          if (registration.existingReg.registrationType === 'mtm') {
+            const template = getI18nUiString('sr', 'signalMtmAlreadyRegisteredReply',
+              'Регистрација MTM није прихваћена. Већ сте регистровани као члан мобилног тима на бирачком месту {location}.');
+            rejectText = fillTemplate(template, { location });
+          } else {
           const template = getI18nUiString('sr', 'signalRegAlreadyRegisteredReply',
             'Регистрација није прихваћена, већ сте регистровани за бирачко место {location}.');
           rejectText = fillTemplate(template, { location });
+          }
         } else {
           const template = getI18nUiString('sr', 'signalRegPlaceTakenReply',
             'Регистрација за {location} није прихваћена, други контролор је већ регистрован за ово бирачко место.');
@@ -1256,6 +1342,46 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
     return { accepted: true, record, configUpdated: true, replySent: Boolean(replyStatus.ok) };
   }
 
+  if (matched.type === 'unregister') {
+    const registration = unregisterSender(config, sender);
+    let replyText = registration.ok
+      ? fillTemplate(getI18nUiString('sr', 'signalUnregisteredReply', 'Регистрација за бирачко место {location} је уклоњена.'), {
+        location: registration.placeName
+      })
+      : getI18nUiString('sr', 'signalUnregisterNotRegisteredReply', 'Нисте регистровани ни на једном бирачком месту.');
+    if (!senderNumber && groupId && sender) replyText = `${sender}, ${replyText}`;
+    if (senderNumber || groupId) {
+      const replyStatus = await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
+      if (registration.ok) {
+        addAcceptedSignalRecord({
+          sender,
+          text,
+          groupId,
+          groupName,
+          direction,
+          region: registration.regionName || null,
+          place: registration.placeName || null,
+          type: matched.type,
+          payload: { registrationType: registration.registrationType }
+        });
+        if (replyStatus.ok) {
+          addAcceptedSignalRecord({
+            sender: 'local-backend',
+            text: replyText,
+            groupId,
+            groupName,
+            direction: 'outgoing',
+            region: registration.regionName || null,
+            place: registration.placeName || null,
+            type: 'unregister-reply',
+            payload: { registrationType: registration.registrationType }
+          });
+        }
+      }
+    }
+    return { accepted: registration.ok, reason: registration.reason, registration };
+  }
+
   const senderCfg = findSenderConfig(config, sender);
   if (!senderCfg) {
     const i18n = loadI18n();
@@ -1267,6 +1393,12 @@ async function handleIncomingMessageProcessing({ sender, senderNumber = null, te
       await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
     }
     return { accepted: false, reason: 'sender-not-registered' };
+  }
+
+  if (senderCfg.registrationType === 'mtm' && !isMtmCommandAllowed(matched.type)) {
+    const replyText = getI18nUiString('sr', 'signalMtmCommandRestrictedReply', 'Као члан мобилног тима можете користити само команду Nep.');
+    if (senderNumber || groupId) await sendSignalReply({ groupId, recipientNumber: senderNumber, messageText: replyText });
+    return { accepted: false, reason: 'mtm-command-not-allowed' };
   }
 
   const votePlace = findPlaceConfigBySender(config, senderCfg.region, senderCfg.municipality, senderCfg.place);
@@ -2034,7 +2166,11 @@ function findSenderInPlace(place, sender, lower) {
     ? place.sender
     : (Array.isArray(place.senders) ? place.senders : []);
 
-  return (senderList || []).find(s => s.signalUser === sender || (s.displayName || '').toLowerCase() === lower || (s.name || '').toLowerCase() === lower);
+  const controller = senderList.find(s => s.signalUser === sender || (s.displayName || '').toLowerCase() === lower || (s.name || '').toLowerCase() === lower);
+  if (controller) return { ...controller, registrationType: 'controller' };
+  const mobileTeamMember = (Array.isArray(place.mobileTeamMembers) ? place.mobileTeamMembers : [])
+    .find((member) => String(member.signalUser || '').trim().toLowerCase() === lower);
+  return mobileTeamMember ? { ...mobileTeamMember, registrationType: 'mtm' } : null;
 }
 
 function findSenderConfig(config, sender) {
@@ -2049,7 +2185,7 @@ function findSenderConfig(config, sender) {
         if (!Array.isArray(mun.places)) continue;
         for (const place of mun.places) {
           const found = findSenderInPlace(place, sender, lower);
-          if (found) return { region: region.name, municipality: mun.name, place: place.name, sender: found };
+          if (found) return { region: region.name, municipality: mun.name, place: place.name, sender: found, registrationType: found.registrationType };
         }
       }
     }
@@ -2058,11 +2194,11 @@ function findSenderConfig(config, sender) {
         if (Array.isArray(place.subPlaces)) {
           for (const sub of place.subPlaces) {
             const found = findSenderInPlace(sub, sender, lower);
-            if (found) return { region: region.name, place: sub.name, parentPlace: place.name, sender: found };
+            if (found) return { region: region.name, place: sub.name, parentPlace: place.name, sender: found, registrationType: found.registrationType };
           }
         }
         const found = findSenderInPlace(place, sender, lower);
-        if (found) return { region: region.name, place: place.name, sender: found };
+        if (found) return { region: region.name, place: place.name, sender: found, registrationType: found.registrationType };
       }
     }
   }
@@ -2443,12 +2579,6 @@ async function refreshSignalRuntimeState() {
    signal.lastCheck = signal.lastHeartbeatAt;
    signal.groups = groups;
   signal.assignedGroupIds = normalizeAssignedSignalGroupIds(signal.assignedGroupIds, groups);
-   if (!signal.selectedGroupId && signal.groups.length) {
-     signal.selectedGroupId = signal.groups[0].id;
-   }
-   if (!signal.groups.length) {
-     signal.selectedGroupId = null;
-   }
    signal.lastMessage = groups.length
      ? 'Signal app is running on this computer and a local bridge reported groups.'
      : 'Signal app is running on this computer, but no local bridge groups were detected.';
@@ -2458,7 +2588,6 @@ async function refreshSignalRuntimeState() {
 
  signal.enabled = true;
  signal.connected = false;
- signal.selectedGroupId = null;
  signal.groups = [];
  signal.lastCheck = null;
  signal.lastHeartbeatAt = null;
@@ -2488,20 +2617,14 @@ app.get('/api/signal/status', async (req, res) => {
    signal.lastCheck = signal.lastHeartbeatAt;
    signal.groups = groups;
   signal.assignedGroupIds = normalizeAssignedSignalGroupIds(signal.assignedGroupIds, groups);
-   if (!signal.groups.length) {
-     signal.selectedGroupId = null;
-   }
    signal.lastMessage = groups.length
      ? 'Signal app is running on this computer and a local bridge reported groups.'
      : 'Signal app is running on this computer, but no local bridge groups were detected.';
    saveSignalConfig(signal);
 
-   const group = signal.groups.find(item => item.id === signal.selectedGroupId) || null;
    return res.json({
      enabled: signal.enabled,
      connected: true,
-     selectedGroupId: group ? group.id : null,
-     selectedGroupName: group ? group.name : null,
     assignedGroupIds: signal.assignedGroupIds,
      groups: signal.groups,
      lastCheck: signal.lastCheck,
@@ -2512,7 +2635,6 @@ app.get('/api/signal/status', async (req, res) => {
 
  signal.enabled = true;
  signal.connected = false;
- signal.selectedGroupId = null;
  signal.groups = [];
  signal.lastCheck = null;
  signal.lastHeartbeatAt = null;
@@ -2522,8 +2644,6 @@ app.get('/api/signal/status', async (req, res) => {
  return res.json({
    enabled: signal.enabled,
    connected: false,
-   selectedGroupId: null,
-   selectedGroupName: null,
    assignedGroupIds: signal.assignedGroupIds,
    groups: [],
    lastCheck: null,
@@ -2535,9 +2655,9 @@ app.get('/api/signal/status', async (req, res) => {
 app.get('/api/signal/groups', (req, res) => {
  const signal = loadSignalConfig();
  if (!signal.connected || !isSignalHeartbeatFresh(signal)) {
-   return res.json({ groups: [], selectedGroupId: null, assignedGroupIds: signal.assignedGroupIds });
+   return res.json({ groups: [], assignedGroupIds: signal.assignedGroupIds });
  }
- res.json({ groups: signal.groups, selectedGroupId: signal.selectedGroupId, assignedGroupIds: signal.assignedGroupIds });
+ res.json({ groups: signal.groups, assignedGroupIds: signal.assignedGroupIds });
 });
 
 app.post('/api/signal/assign-groups', (req, res) => {
@@ -2567,22 +2687,14 @@ app.post('/api/signal/heartbeat', (req, res) => {
    signal.groups = nextGroups;
  }
 
- if (payload.selectedGroupId && signal.groups.some(group => group.id === payload.selectedGroupId)) {
-   signal.selectedGroupId = payload.selectedGroupId;
- } else if (signal.groups.length) {
-   signal.selectedGroupId = signal.groups[0].id;
- } else {
-   signal.selectedGroupId = null;
- }
-
  signal.enabled = true;
  signal.connected = true;
  signal.lastHeartbeatAt = new Date().toISOString();
  signal.lastCheck = signal.lastHeartbeatAt;
- signal.lastMessage = payload.lastMessage || (signal.selectedGroupId ? `Signal bridge is active and listening to the selected group.` : 'Signal bridge is active.');
+ signal.lastMessage = payload.lastMessage || `Signal bridge is active for ${signal.assignedGroupIds.length} assigned group${signal.assignedGroupIds.length === 1 ? '' : 's'}.`;
  saveSignalConfig(signal);
 
- res.json({ ok: true, connected: true, selectedGroupId: signal.selectedGroupId, selectedGroupName: signal.groups.find(item => item.id === signal.selectedGroupId)?.name || null, lastMessage: signal.lastMessage });
+ res.json({ ok: true, connected: true, assignedGroupIds: signal.assignedGroupIds, lastMessage: signal.lastMessage });
 });
 
 app.post('/api/signal/manual-ok', (req, res) => {
@@ -2592,35 +2704,15 @@ app.post('/api/signal/manual-ok', (req, res) => {
  signal.lastHeartbeatAt = new Date().toISOString();
  signal.lastCheck = signal.lastHeartbeatAt;
  signal.groups = [];
- signal.selectedGroupId = null;
  signal.lastMessage = 'Signal app confirmed as running on this computer, but no local bridge groups were detected.';
  saveSignalConfig(signal);
 
- res.json({ ok: true, connected: true, selectedGroupId: null, selectedGroupName: null, lastMessage: signal.lastMessage });
-});
-
-app.post('/api/signal/select-group', (req, res) => {
- const { groupId } = req.body || {};
- const signal = loadSignalConfig();
- const group = (signal.groups || []).find(item => item.id === groupId);
-
- if (!group) {
-   return res.status(400).json({ ok: false, reason: 'group-not-found' });
- }
-
- signal.selectedGroupId = group.id;
- signal.connected = true;
- signal.lastHeartbeatAt = new Date().toISOString();
- signal.lastCheck = signal.lastHeartbeatAt;
- signal.lastMessage = `Listening to Signal group: ${group.name}`;
- saveSignalConfig(signal);
-
- res.json({ ok: true, selectedGroupId: group.id, selectedGroupName: group.name, lastMessage: signal.lastMessage });
+ res.json({ ok: true, connected: true, assignedGroupIds: signal.assignedGroupIds, lastMessage: signal.lastMessage });
 });
 
 app.post('/api/signal/test', (req, res) => {
  const signal = loadSignalConfig();
- const group = (signal.groups || []).find(item => item.id === signal.selectedGroupId) || signal.groups[0] || null;
+ const group = (signal.groups || []).find(item => signal.assignedGroupIds.includes(item.id)) || null;
  const requestedConnected = Boolean(req.body && req.body.connected === true);
 
  if (!requestedConnected) {
@@ -2628,11 +2720,10 @@ app.post('/api/signal/test', (req, res) => {
    signal.enabled = true;
    signal.lastHeartbeatAt = null;
    signal.lastCheck = null;
-   signal.selectedGroupId = null;
    signal.groups = [];
    signal.lastMessage = 'Signal app is not running; bridge is waiting for an active connection.';
    saveSignalConfig(signal);
-   return res.json({ ok: true, connected: false, selectedGroupId: null, selectedGroupName: null, lastMessage: signal.lastMessage });
+  return res.json({ ok: true, connected: false, assignedGroupIds: signal.assignedGroupIds, lastMessage: signal.lastMessage });
  }
 
  signal.connected = true;
@@ -2640,13 +2731,12 @@ app.post('/api/signal/test', (req, res) => {
  signal.lastHeartbeatAt = new Date().toISOString();
  signal.lastCheck = signal.lastHeartbeatAt;
  signal.groups = signal.groups || [];
- signal.selectedGroupId = group ? group.id : null;
  signal.lastMessage = group
    ? `Signal bridge test passed for group: ${group.name}`
    : 'Signal app is running, but no local bridge groups were detected.';
  saveSignalConfig(signal);
 
- res.json({ ok: true, connected: true, selectedGroupId: group ? group.id : null, selectedGroupName: group ? group.name : null, lastMessage: signal.lastMessage });
+ res.json({ ok: true, connected: true, assignedGroupIds: signal.assignedGroupIds, lastMessage: signal.lastMessage });
 });
 
 app.get('/api/messages', (req, res) => {
@@ -2722,7 +2812,23 @@ app.get('/api/irregularities', async (req, res) => {
     }
   }
   if (changed) saveIrregularities(records);
-  res.json(records.slice().sort((a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0)));
+  const sorted = records.slice().sort((a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0));
+  if (isMediaRole(req.remoteAccessRole)) return res.json(projectMediaIrregularities(sorted));
+  res.json(sorted);
+});
+
+app.post('/api/irregularities/:id/approval', (req, res) => {
+  if (!canApproveIrregularities(req.remoteAccess, req.remoteAccessRole)) {
+    return res.status(403).json({ ok: false, error: 'lawyer-role-required' });
+  }
+  if (typeof req.body?.approved !== 'boolean') return res.status(400).json({ ok: false, error: 'invalid-approval' });
+  const records = loadIrregularities();
+  const record = records.find((item) => String(item.id) === String(req.params.id));
+  if (!record) return res.status(404).json({ ok: false, error: 'irregularity-not-found' });
+  record.approved = req.body.approved;
+  record.approvedAt = req.body.approved ? new Date().toISOString() : null;
+  saveIrregularities(records);
+  res.json({ ok: true, approved: record.approved, approvedAt: record.approvedAt });
 });
 
 app.patch('/api/irregularities/:id', (req, res) => {
@@ -2741,6 +2847,7 @@ app.patch('/api/irregularities/:id', (req, res) => {
 
 app.get('/api/irregularities/:id/attachments/:index', (req, res) => {
   const record = loadIrregularities().find((item) => String(item.id) === String(req.params.id));
+  if (isMediaRole(req.remoteAccessRole) && record?.approved !== true) return res.status(404).end();
   const attachment = record && record.attachments && record.attachments[Number(req.params.index)];
   if (!attachment || !attachment.storedFilename) return res.status(404).end();
   const filePath = path.join(IRREGULARITIES_MEDIA_DIR, path.basename(attachment.storedFilename));
@@ -2761,6 +2868,7 @@ app.delete('/api/irregularities', (req, res) => {
 });
 
 app.get('/api/zap-records', (req, res) => {
+  if (!canAccessVotingRecords(req.remoteAccessRole)) return res.status(403).json({ error: 'media-role-forbidden' });
   res.json(loadZapRecords().slice().sort((a, b) => new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0)));
 });
 
@@ -2792,6 +2900,7 @@ app.delete('/api/zap-records', (req, res) => {
 });
 
 app.get('/api/zap-records/:id/attachments/:index', (req, res) => {
+  if (!canAccessVotingRecords(req.remoteAccessRole)) return res.status(403).end();
   const record = loadZapRecords().find((item) => String(item.id) === String(req.params.id));
   const attachment = record && record.attachments && record.attachments[Number(req.params.index)];
   if (!attachment || !attachment.storedFilename) return res.status(404).end();
@@ -2823,8 +2932,11 @@ app.post('/api/messages', async (req, res) => {
     return res.status(400).json({ accepted: false, reason: 'missing-sender-or-text' });
   }
 
+  const groupId = payload.groupId || null;
+  if (direction === 'incoming' && !groupId) {
+    return res.status(400).json({ accepted: false, reason: 'group-id-required' });
+  }
   const signal = loadSignalConfig();
-  const groupId = payload.groupId || signal.selectedGroupId || null;
   const groupName = payload.groupName || (groupId ? ((signal.groups || []).find(item => item.id === groupId) || {}).name || null : null);
 
   if (direction === 'incoming') {
@@ -2877,13 +2989,13 @@ app.post('/api/messages/sent', (req, res) => {
   }
 
   const signal = loadSignalConfig();
-  const selectedGroupId = groupId || signal.selectedGroupId || null;
-  const selectedGroupName = groupName || (selectedGroupId ? ((signal.groups || []).find((item) => item.id === selectedGroupId) || {}).name || null : null);
+  const messageGroupId = groupId || null;
+  const messageGroupName = groupName || (messageGroupId ? ((signal.groups || []).find((item) => item.id === messageGroupId) || {}).name || null : null);
   addRawSignalMessage({
     direction: 'outgoing',
-    rawPayload: { method: 'send', params: { groupId: selectedGroupId, message: text } },
-    groupId: selectedGroupId,
-    groupName: selectedGroupName,
+    rawPayload: { method: 'send', params: { groupId: messageGroupId, message: text } },
+    groupId: messageGroupId,
+    groupName: messageGroupName,
     source: 'local-server-send'
   });
 
@@ -2898,8 +3010,8 @@ app.post('/api/messages/sent', (req, res) => {
     rawMessage: text,
     receivedAt: new Date().toISOString(),
     direction: 'outgoing',
-    groupId: selectedGroupId,
-    groupName: selectedGroupName
+    groupId: messageGroupId,
+    groupName: messageGroupName
   };
   messages.push(record);
   saveMessages(messages);

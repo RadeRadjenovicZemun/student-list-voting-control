@@ -6,6 +6,7 @@ const SESSION_IDLE_TTL_MS = 90 * 1000;
 const SESSION_MAX_AGE_MS = 30 * 60 * 1000;
 const SESSION_RENEW_PROMPT_MS = 60 * 1000;
 const MAX_CODE_ATTEMPTS = 5;
+const ACCESS_ROLES = ['media', 'lawyer'];
 
 function normalizeIp(address) {
   const value = String(address || '').trim().toLowerCase();
@@ -40,6 +41,7 @@ function createAccessControl(options = {}) {
   const requests = new Map();
   const sessions = new Map();
   const revokedTokens = new Map();
+  const expiredSessions = new Map();
 
   function getRequest(id, ip) {
     const request = requests.get(String(id || ''));
@@ -57,6 +59,12 @@ function createAccessControl(options = {}) {
     if (!session || session.ip !== normalizeIp(ip)) return null;
     if (session.lastSeenAt + SESSION_IDLE_TTL_MS <= now() || session.maxExpiresAt <= now()) {
       sessions.delete(tokenHash);
+      expiredSessions.set(tokenHash, {
+        ip: session.ip,
+        requestId: session.requestId,
+        role: session.role || 'lawyer',
+        reason: session.lastSeenAt + SESSION_IDLE_TTL_MS <= now() ? 'idle-timeout' : 'maximum-duration'
+      });
       return null;
     }
     return { tokenHash, session };
@@ -107,11 +115,13 @@ function createAccessControl(options = {}) {
       }));
   }
 
-  function approveRequest(id, ip) {
+  function approveRequest(id, ip, role = 'lawyer') {
     const request = getRequest(id, ip);
     if (!request || request.status !== 'pending') return null;
+    if (!ACCESS_ROLES.includes(role)) return null;
     const code = makeCode();
     request.status = 'approved';
+    request.role = role;
     request.codeHash = hashSecret(`${request.id}:${code}`);
     request.codeExpiresAt = now() + CODE_TTL_MS;
     return { code, ip: request.ip, codeExpiresAt: new Date(request.codeExpiresAt).toISOString() };
@@ -158,13 +168,35 @@ function createAccessControl(options = {}) {
     const timestamp = now();
     sessions.set(hashSecret(token), {
       ip: request.ip,
+      role: request.role || 'lawyer',
       userAgent: request.userAgent,
       requestId: request.id,
       createdAt: timestamp,
       lastSeenAt: timestamp,
       maxExpiresAt: timestamp + SESSION_MAX_AGE_MS
     });
-    return { ok: true, token };
+    return { ok: true, token, requestId: request.id, role: request.role || 'lawyer' };
+  }
+
+  function getSessionDetails(token, ip) {
+    if (!token) return null;
+    const tokenHash = hashSecret(token);
+    const session = sessions.get(tokenHash);
+    if (!session || session.ip !== normalizeIp(ip)) return null;
+    return {
+      requestId: session.requestId,
+      ip: session.ip,
+      role: session.role || 'lawyer'
+    };
+  }
+
+  function consumeExpiredSession(token, ip) {
+    if (!token) return null;
+    const tokenHash = hashSecret(token);
+    const session = expiredSessions.get(tokenHash);
+    if (!session || session.ip !== normalizeIp(ip)) return null;
+    expiredSessions.delete(tokenHash);
+    return session;
   }
 
   function authenticate(token, ip) {
@@ -172,6 +204,7 @@ function createAccessControl(options = {}) {
     if (!found) return null;
     const { session } = found;
     return {
+      role: session.role || 'lawyer',
       expiresAt: Math.min(session.lastSeenAt + SESSION_IDLE_TTL_MS, session.maxExpiresAt),
       renewRequired: session.maxExpiresAt - now() <= SESSION_RENEW_PROMPT_MS
     };
@@ -216,11 +249,18 @@ function createAccessControl(options = {}) {
     for (const [tokenHash, session] of sessions) {
       if (session.lastSeenAt + SESSION_IDLE_TTL_MS <= timestamp || session.maxExpiresAt <= timestamp) {
         sessions.delete(tokenHash);
+        expiredSessions.set(tokenHash, {
+          ip: session.ip,
+          requestId: session.requestId,
+          role: session.role || 'lawyer',
+          reason: session.lastSeenAt + SESSION_IDLE_TTL_MS <= timestamp ? 'idle-timeout' : 'maximum-duration'
+        });
       }
     }
     return [...sessions.values()].map((session) => ({
       id: session.requestId,
       ip: session.ip,
+      role: session.role || 'lawyer',
       userAgent: session.userAgent || '',
       createdAt: new Date(session.createdAt).toISOString(),
       lastSeenAt: new Date(session.lastSeenAt).toISOString(),
@@ -252,6 +292,8 @@ function createAccessControl(options = {}) {
     verifyCode,
     authenticate,
     heartbeat,
+    getSessionDetails,
+    consumeExpiredSession,
     renewSession,
     revokeSession,
     isRevoked,

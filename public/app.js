@@ -1,6 +1,7 @@
 
       let cachedConfig = null;
       let remoteAccessMode = false;
+      let remoteAccessRole = null;
       let remoteResultsLocked = true;
       let remoteResultsUnlockAt = '20:00';
       let accessControlPollTimer = null;
@@ -30,6 +31,7 @@
       let coverageTimelineSnapshots = [];
       let resultsChartSplitRatio = 1 / 3;
       let irregularitiesRecords = [];
+      let irregularityAggregateCounts = null;
       let irregularitiesFilter = { type: 'all', value: 'all' };
       let irregularitiesTreeBuiltForConfig = null;
       let selectedIrregularityId = null;
@@ -304,15 +306,18 @@
           inProgress: locale.debugInProgressTab || 'In Progress',
           message: locale.debugMessageTab || 'Message',
           irregularities: locale.debugIrregularitiesTab || 'Irregularities',
+          remoteConnections: locale.debugRemoteConnectionsTab || 'Remote Connections',
           database: locale.debugDatabaseTab || 'Data Base'
         };
         const debugInProgressTab = document.querySelector('[data-debug-main-tab="debug-main-tab-in-progress"]');
         const debugMessageTab = document.querySelector('[data-debug-main-tab="debug-main-tab-message"]');
         const debugDatabaseTabBtn = document.querySelector('[data-debug-main-tab="debug-main-tab-database"]');
+        const remoteConnectionsTabBtn = document.querySelector('[data-debug-main-tab="debug-main-tab-remote-connections"]');
         const debugIrregularitiesTab = document.querySelector('[data-debug-main-tab="debug-main-tab-irregularities"]');
         if (debugInProgressTab) debugInProgressTab.textContent = debugMainTabs.inProgress;
         if (debugMessageTab) debugMessageTab.textContent = debugMainTabs.message;
         if (debugDatabaseTabBtn) debugDatabaseTabBtn.textContent = debugMainTabs.database;
+        if (remoteConnectionsTabBtn) remoteConnectionsTabBtn.textContent = debugMainTabs.remoteConnections;
         if (debugIrregularitiesTab) debugIrregularitiesTab.textContent = debugMainTabs.irregularities;
 
         const irregularityHeaders = {
@@ -321,6 +326,7 @@
           irregularitiesSenderHeader: locale.irregularitiesSender || 'Sender',
           irregularitiesPlaceHeader: locale.irregularitiesPlace || 'Voting place',
           irregularitiesExplanationHeader: locale.irregularitiesExplanation || 'Explanation',
+          irregularitiesApprovedHeader: locale.irregularitiesApproved || 'Approved',
           irregularitiesPhotoHeader: locale.irregularitiesPhoto || 'Photo'
         };
         Object.entries(irregularityHeaders).forEach(([id, text]) => {
@@ -392,6 +398,8 @@
         if (dbClearIrregularitiesLabel) dbClearIrregularitiesLabel.textContent = locale.dbClearIrregularities || 'Delete All Irregularities';
         const dbClearZapRecordsLabel = document.getElementById('dbClearZapRecordsLabel');
         if (dbClearZapRecordsLabel) dbClearZapRecordsLabel.textContent = locale.dbClearZapRecords || 'Delete All Polling Station Records';
+        const dbClearRemoteConnectionsLabel = document.getElementById('dbClearRemoteConnectionsLabel');
+        if (dbClearRemoteConnectionsLabel) dbClearRemoteConnectionsLabel.textContent = locale.dbClearRemoteConnections || 'Delete Remote Session Logins';
 
         const settingsStopwatchTab = document.querySelector('[data-settings-tab="settings-tab-stopwatch"]');
         if (settingsStopwatchTab) {
@@ -410,10 +418,13 @@
 
         const accessLabels = {
           '[data-debug-tab="debug-tab-access-control"]': locale.accessControlTab || 'Access Control',
+          '#accessServerAddressTitle': locale.accessServerAddressTitle || 'Local server address',
+          '#accessServerAddressHint': locale.accessServerAddressHint || 'To access the server from other remote clients, use one of these addresses:',
           '#accessRequestsTitle': locale.accessRequestsTitle || 'Access requests',
           '#accessSessionsTitle': locale.accessSessionsTitle || 'Active sessions',
           '#accessRequestsIpHeader': locale.accessIpHeader || 'IP address',
           '#accessSessionsIpHeader': locale.accessIpHeader || 'IP address',
+          '#accessSessionRoleHeader': locale.accessSessionRoleHeader || 'Role',
           '#accessRequestedAtHeader': locale.accessRequestedAtHeader || 'Request time',
           '#accessDeviceHeader': locale.accessDeviceHeader || 'Device',
           '#accessSessionDeviceHeader': locale.accessDeviceHeader || 'Device',
@@ -421,26 +432,47 @@
           '#accessApprovedAtHeader': locale.accessApprovedAtHeader || 'Approved',
           '#accessLastActivityHeader': locale.accessLastActivityHeader || 'Last activity',
           '#accessExpiresHeader': locale.accessExpiresHeader || 'Expires',
+          '#accessRoleLabel': locale.accessRoleLabel || 'Remote team role',
+          '#accessRoleSelect option[value=""]': locale.accessRoleChoose || 'Choose a role',
+          '#accessRoleSelect option[value="media"]': locale.accessRoleMedia || 'Media Team',
+          '#accessRoleSelect option[value="lawyer"]': locale.accessRoleLawyer || 'Lawyer Team',
           '#accessRequestDialogTitle': locale.accessDialogNewRequestTitle || 'New access request',
           '#accessApprovalCodeLabel': locale.accessDialogOneTimeCode || 'Provide this one-time code to the user:',
           '#accessDialogApproveBtn': locale.accessApproveButton || 'Approve',
           '#accessDialogRejectBtn': locale.accessRejectButton || 'Reject',
           '#accessDialogCloseBtn': locale.accessDialogClose || 'Close'
         };
+        const remoteConnectionHeaders = {
+          remoteConnectionRequestedHeader: locale.remoteConnectionRequested || 'Requested',
+          remoteConnectionIpHeader: locale.accessIpHeader || 'IP address',
+          remoteConnectionDeviceHeader: locale.accessDeviceHeader || 'Device',
+          remoteConnectionRoleHeader: locale.accessSessionRoleHeader || 'Role',
+          remoteConnectionStatusHeader: locale.remoteConnectionStatus || 'Status',
+          remoteConnectionStartedHeader: locale.remoteConnectionStarted || 'Started',
+          remoteConnectionStartedByHeader: locale.remoteConnectionStartedBy || 'Started by',
+          remoteConnectionEndedHeader: locale.remoteConnectionEnded || 'Ended',
+          remoteConnectionEndedByHeader: locale.remoteConnectionEndedBy || 'Terminated by'
+        };
+        Object.entries(remoteConnectionHeaders).forEach(([id, text]) => {
+          const element = document.getElementById(id);
+          if (element) element.textContent = text;
+        });
         Object.entries(accessLabels).forEach(([selector, text]) => {
           const element = document.querySelector(selector);
           if (element) element.textContent = text;
         });
+        const closeAccessDialogButton = document.getElementById('accessRequestDialogCloseX');
+        if (closeAccessDialogButton) {
+          const closeLabel = locale.accessDialogClose || 'Close';
+          closeAccessDialogButton.setAttribute('aria-label', closeLabel);
+          closeAccessDialogButton.title = closeLabel;
+        }
 
         const signalDescription = document.getElementById('signalDescription');
         if (signalDescription) {
           signalDescription.textContent = locale.signalDescription || 'Connects to Signal App group responsible for collecting election results and different statuses';
         }
 
-        const signalGroupLabel = document.getElementById('signalGroupLabel');
-        if (signalGroupLabel) {
-          signalGroupLabel.textContent = locale.signalGroupLabel || 'Signal group';
-        }
         const signalColumnFilterLabel = document.getElementById('signalColumnFilterLabel');
         if (signalColumnFilterLabel) {
           signalColumnFilterLabel.textContent = locale.signalColumnFilterLabel || 'Filter';
@@ -486,23 +518,6 @@
           outgoingHeaders[1].textContent = locale.signalTableTime || 'Time';
           outgoingHeaders[2].textContent = locale.signalTableTarget || 'Target';
           outgoingHeaders[3].textContent = locale.signalTableMessage || 'Message';
-        }
-
-        const signalGroupPlaceholder = locale.signalGroupPlaceholder || '-- Select group --';
-        const signalGroupSelect = document.getElementById('signalGroupSelect');
-        if (signalGroupSelect) {
-          const currentValue = signalGroupSelect.value;
-          Array.from(signalGroupSelect.options).forEach((option) => {
-            if (!option.value && option.textContent === '-- Select group --') {
-              option.textContent = signalGroupPlaceholder;
-            }
-            if (!option.value && option.textContent === 'No Signal groups detected') {
-              option.textContent = signalGroupPlaceholder;
-            }
-          });
-          if (!currentValue && signalGroupSelect.options.length) {
-            signalGroupSelect.options[0].textContent = signalGroupPlaceholder;
-          }
         }
 
         const stopwatchExplanation = document.getElementById('stopwatchExplanation');
@@ -627,7 +642,10 @@
             { id: 'language', label: 'Jezik' }
           ];
         return remoteAccessMode
-          ? items.filter((item) => !['debug', 'tools', 'alati'].includes(String(item.id).toLowerCase()))
+          ? [
+            ...items.filter((item) => !['debug', 'tools', 'alati', 'language'].includes(String(item.id).toLowerCase())),
+            { id: 'remote-logout', label: getLocaleDictionary().remoteLogout || 'Logout' }
+          ]
           : items;
       }
 
@@ -694,7 +712,7 @@
           debugPanel.hidden = remoteAccessMode;
           if (remoteAccessMode) debugPanel.style.display = 'none';
         }
-        const items = getNavigationItems(config);
+        const items = getNavigationItems(config).filter((item) => !(remoteAccessMode && remoteAccessRole === 'media' && item.id === 'zap-records'));
         items.forEach((item, index) => {
           if (item.id === 'language') return;
 
@@ -710,6 +728,10 @@
           }
           button.addEventListener('click', () => {
             if (button.disabled) return;
+            if (button.dataset.panel === 'remote-logout') {
+              logoutRemoteSession().catch((error) => setAccessControlStatus(error.message));
+              return;
+            }
             document.querySelectorAll('.menu-item').forEach((b) => b.classList.toggle('active', b === button));
             const panel = button.dataset.panel;
             document.getElementById('pageTitle').textContent = button.textContent;
@@ -727,6 +749,13 @@
         const pageTitle = document.getElementById('pageTitle');
         if (active && pageTitle) pageTitle.textContent = active.textContent;
         updateSidebarNavigationState();
+      }
+
+      async function logoutRemoteSession() {
+        const response = await fetch('/access/logout', { method: 'POST', cache: 'no-store' });
+        if (!response.ok) throw new Error(getLocaleDictionary().remoteLogoutFailed || 'Unable to log out.');
+        remoteAccessMode = false;
+        location.replace('/access/logout');
       }
 
       function setupLanguageSelector(config) {
@@ -897,6 +926,7 @@
           }
           const state = await response.json();
           remoteAccessMode = Boolean(state.remoteAccess);
+          remoteAccessRole = state.role || null;
           if (remoteAccessMode) startRemoteSessionHeartbeat();
         } catch (error) {
           remoteAccessMode = true;
@@ -998,7 +1028,13 @@
       }
 
       async function handleAccessRequestDecision(requestId, approve) {
-        const response = await fetch(`/api/access/requests/${encodeURIComponent(requestId)}/${approve ? 'approve' : 'reject'}`, { method: 'POST' });
+        const role = document.getElementById('accessRoleSelect')?.value || '';
+        if (approve && !role) throw new Error(accessLocaleText('accessRoleRequired', 'Choose a remote team role before approving.'));
+        const response = await fetch(`/api/access/requests/${encodeURIComponent(requestId)}/${approve ? 'approve' : 'reject'}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: approve ? JSON.stringify({ role }) : '{}'
+        });
         const result = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(accessLocaleText('accessRequestConflict', 'This request is no longer active.'));
 
@@ -1017,6 +1053,24 @@
         await refreshAccessControlPanel();
       }
 
+      function showAccessRequestDialog(request) {
+        const dialog = document.getElementById('accessRequestDialog');
+        if (!dialog) return;
+        accessDialogRequestId = request.id;
+        document.getElementById('accessRequestDialogDetails').textContent = accessLocaleText(
+          'accessDialogPendingRequest',
+          'A device at IP address {ip} is requesting dashboard access.',
+          { ip: request.ip }
+        );
+        document.getElementById('accessRequestDecisionActions').hidden = false;
+        document.getElementById('accessApprovalCodePanel').hidden = true;
+        const roleSelect = document.getElementById('accessRoleSelect');
+        const approveButton = document.getElementById('accessDialogApproveBtn');
+        if (roleSelect) roleSelect.value = '';
+        if (approveButton) approveButton.disabled = true;
+        if (!dialog.open) dialog.showModal();
+      }
+
       function renderAccessRequestRows(requests) {
         const tbody = document.getElementById('accessRequestsBody');
         if (!tbody) return;
@@ -1025,19 +1079,26 @@
         tbody.replaceChildren();
         for (const request of requests) {
           const row = document.createElement('tr');
-          for (const value of [request.ip, new Date(request.requestedAt).toLocaleString(), request.userAgent || '—']) {
+          const fields = [
+            [request.ip, 'accessRequestsIpHeader'],
+            [new Date(request.requestedAt).toLocaleString(), 'accessRequestedAtHeader'],
+            [request.userAgent || '—', 'accessDeviceHeader']
+          ];
+          for (const [value, headerId] of fields) {
             const cell = document.createElement('td');
             cell.textContent = value;
+            cell.dataset.label = document.getElementById(headerId)?.textContent || '';
             row.appendChild(cell);
           }
           const actions = document.createElement('td');
+          actions.dataset.label = document.getElementById('accessDecisionHeader')?.textContent || '';
           if (request.status === 'pending') {
             const buttons = document.createElement('div');
             buttons.className = 'access-control-row-actions';
             const approve = document.createElement('button');
             approve.type = 'button';
             approve.textContent = locale.accessApproveButton || 'Approve';
-            approve.addEventListener('click', () => handleAccessRequestDecision(request.id, true).catch((error) => setAccessControlStatus(error.message)));
+            approve.addEventListener('click', () => showAccessRequestDialog(request));
             const reject = document.createElement('button');
             reject.type = 'button';
             reject.className = 'reject';
@@ -1057,23 +1118,39 @@
         const tbody = document.getElementById('accessSessionsBody');
         if (!tbody) return;
         const locale = getLocaleDictionary();
-        if (!sessions.length) return setAccessTableMessage(tbody, 6, locale.accessNoSessions || 'Нема активних удаљених сесија.');
+        if (!sessions.length) return setAccessTableMessage(tbody, 7, locale.accessNoSessions || 'Нема активних удаљених сесија.');
         tbody.replaceChildren();
         for (const session of sessions) {
           const row = document.createElement('tr');
-          for (const value of [session.ip, session.userAgent || '—', new Date(session.createdAt).toLocaleString(), new Date(session.lastSeenAt).toLocaleTimeString(), new Date(session.expiresAt).toLocaleTimeString()]) {
+          const fields = [
+            [session.ip, 'accessSessionsIpHeader'],
+            [session.userAgent || '—', 'accessSessionDeviceHeader'],
+            [session.role === 'media' ? (locale.accessRoleMedia || 'Media Team') : (locale.accessRoleLawyer || 'Lawyer Team'), 'accessSessionRoleHeader'],
+            [new Date(session.createdAt).toLocaleString(), 'accessApprovedAtHeader'],
+            [new Date(session.lastSeenAt).toLocaleTimeString(), 'accessLastActivityHeader'],
+            [new Date(session.expiresAt).toLocaleTimeString(), 'accessExpiresHeader']
+          ];
+          for (const [value, headerId] of fields) {
             const cell = document.createElement('td');
             cell.textContent = value;
+            cell.dataset.label = document.getElementById(headerId)?.textContent || '';
             row.appendChild(cell);
           }
           const actionCell = document.createElement('td');
+          actionCell.dataset.label = locale.accessActionHeader || 'Action';
           const revoke = document.createElement('button');
           revoke.type = 'button';
           revoke.className = 'reject';
           revoke.textContent = locale.accessRevokeButton || 'Revoke';
           revoke.addEventListener('click', async () => {
-            await fetch(`/api/access/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
+            const response = await fetch(`/api/access/sessions/${encodeURIComponent(session.id)}`, { method: 'DELETE' });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result.ok) {
+              setAccessControlStatus(locale.accessRevokeFailed || 'Unable to revoke this session.');
+              return;
+            }
             await refreshAccessControlPanel();
+            await refreshRemoteConnectionHistory();
           });
           actionCell.appendChild(revoke);
           row.appendChild(actionCell);
@@ -1081,37 +1158,73 @@
         }
       }
 
+      function renderAccessServerAddresses(data) {
+        const container = document.getElementById('accessServerAddresses');
+        if (!container) return;
+        const locale = getLocaleDictionary();
+        const addresses = Array.isArray(data.addresses) ? data.addresses : [];
+        container.replaceChildren();
+        if (!addresses.length) {
+          container.textContent = locale.accessServerAddressUnavailable || 'No private network address was found.';
+          return;
+        }
+        for (const address of addresses) {
+          const host = address.includes(':') ? `[${address}]` : address;
+          const url = `${window.location.protocol}//${host}:${data.port}/`;
+          const link = document.createElement('a');
+          link.href = url;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          link.textContent = url;
+          container.appendChild(link);
+        }
+      }
+
       async function refreshAccessControlPanel() {
         if (remoteAccessMode) return;
         try {
-          const [requestsResponse, sessionsResponse] = await Promise.all([
+          const [addressResponse, requestsResponse, sessionsResponse] = await Promise.all([
+            fetch('/api/access/server-address', { cache: 'no-store' }),
             fetch('/api/access/requests', { cache: 'no-store' }),
             fetch('/api/access/sessions', { cache: 'no-store' })
           ]);
           if (!requestsResponse.ok || !sessionsResponse.ok) return;
+          if (addressResponse.ok) renderAccessServerAddresses(await addressResponse.json());
           const requestData = await requestsResponse.json();
           const sessionData = await sessionsResponse.json();
           const requests = requestData.requests || [];
+          const sessions = sessionData.sessions || [];
           renderAccessRequestRows(requests);
-          renderAccessSessionRows(sessionData.sessions || []);
-          const newest = requests.find((request) => request.status === 'pending' && !announcedAccessRequestIds.has(request.id));
+          renderAccessSessionRows(sessions);
+          const remoteHistoryPanel = document.getElementById('debug-main-tab-remote-connections');
+          const debugMainPanel = document.getElementById('debug-tab-main');
+          if (remoteHistoryPanel?.classList.contains('active') && debugMainPanel?.classList.contains('active')) {
+            await refreshRemoteConnectionHistory();
+          }
           const dialog = document.getElementById('accessRequestDialog');
+          const approvalCodePanel = document.getElementById('accessApprovalCodePanel');
+          const matchingSession = sessions.some((session) => session.id === accessDialogRequestId);
+          if (dialog?.open && approvalCodePanel && !approvalCodePanel.hidden && matchingSession) {
+            dialog.close();
+            accessDialogRequestId = null;
+          }
+          const newest = requests.find((request) => request.status === 'pending' && !announcedAccessRequestIds.has(request.id));
           if (newest && dialog && !dialog.open) {
             announcedAccessRequestIds.add(newest.id);
-            accessDialogRequestId = newest.id;
-            document.getElementById('accessRequestDialogDetails').textContent = `Уређај са IP адресом ${newest.ip} тражи приступ контролној табли.`;
-            document.getElementById('accessRequestDecisionActions').hidden = false;
-            document.getElementById('accessApprovalCodePanel').hidden = true;
-            dialog.showModal();
+            showAccessRequestDialog(newest);
           }
         } catch (error) {
           setAccessControlStatus(getLocaleDictionary().accessRefreshFailed || 'Unable to refresh access requests.');
-                    document.getElementById('accessRequestDialogDetails').textContent = accessLocaleText('accessDialogPendingRequest', 'A device at IP address {ip} is requesting dashboard access.', { ip: newest.ip });
         }
       }
 
       function setupAccessControl() {
         const dialog = document.getElementById('accessRequestDialog');
+        const roleSelect = document.getElementById('accessRoleSelect');
+        const approveButton = document.getElementById('accessDialogApproveBtn');
+        roleSelect?.addEventListener('change', () => {
+          if (approveButton) approveButton.disabled = !roleSelect.value;
+        });
         document.getElementById('accessDialogApproveBtn')?.addEventListener('click', () => {
           if (accessDialogRequestId) handleAccessRequestDecision(accessDialogRequestId, true).catch((error) => setAccessControlStatus(error.message));
         });
@@ -1119,6 +1232,7 @@
           if (accessDialogRequestId) handleAccessRequestDecision(accessDialogRequestId, false).catch((error) => setAccessControlStatus(error.message));
         });
         document.getElementById('accessDialogCloseBtn')?.addEventListener('click', () => dialog?.close());
+        document.getElementById('accessRequestDialogCloseX')?.addEventListener('click', () => dialog?.close());
         refreshAccessControlPanel();
         if (!accessControlPollTimer) accessControlPollTimer = setInterval(refreshAccessControlPanel, 4000);
       }
@@ -1134,12 +1248,12 @@
         }
         const buttons = document.querySelectorAll('.debug-tab-btn');
         const panels = document.querySelectorAll('.debug-tab-panel');
-        const debugTabs = getLanguageConfig(cachedConfig || {}, activeLanguage).debugTabs || { main: 'Debug', settings: 'Podesavanja' };
+        const debugTabs = getLanguageConfig(cachedConfig || {}, activeLanguage).debugTabs || { main: 'Debug', settings: 'Подешавања' };
 
         const mainTab = document.querySelector('[data-debug-tab="debug-tab-main"]');
         const settingsTab = document.querySelector('[data-debug-tab="debug-tab-settings"]');
         if (mainTab) mainTab.textContent = debugTabs.main || 'Debug';
-        if (settingsTab) settingsTab.textContent = debugTabs.settings || 'Podesavanja';
+        if (settingsTab) settingsTab.textContent = debugTabs.settings || 'Подешавања';
 
         buttons.forEach((button) => {
           button.addEventListener('click', () => {
@@ -1163,8 +1277,6 @@
 
         setupDebugMainTabs();
         setupSettingsTabs();
-        setupTurnoutTabs();
-        setupResultsTabs();
       }
 
       function setupDebugMainTabs() {
@@ -1175,9 +1287,11 @@
         const inProgressTab = document.querySelector('[data-debug-main-tab="debug-main-tab-in-progress"]');
         const messageTab = document.querySelector('[data-debug-main-tab="debug-main-tab-message"]');
         const databaseTab = document.querySelector('[data-debug-main-tab="debug-main-tab-database"]');
+        const remoteConnectionsTab = document.querySelector('[data-debug-main-tab="debug-main-tab-remote-connections"]');
         if (inProgressTab) inProgressTab.textContent = locale.debugInProgressTab || 'In Progress';
         if (messageTab) messageTab.textContent = locale.debugMessageTab || 'Message';
         if (databaseTab) databaseTab.textContent = locale.debugDatabaseTab || 'Data Base';
+        if (remoteConnectionsTab) remoteConnectionsTab.textContent = locale.debugRemoteConnectionsTab || 'Remote Connections';
 
         buttons.forEach((button) => {
           button.addEventListener('click', () => {
@@ -1198,7 +1312,57 @@
             });
           });
         });
+        if (remoteConnectionsTab && !remoteConnectionsTab.dataset.historyReady) {
+          remoteConnectionsTab.dataset.historyReady = '1';
+          remoteConnectionsTab.addEventListener('click', refreshRemoteConnectionHistory);
+        }
         setupDebugValidMessageTabs();
+      }
+
+      async function refreshRemoteConnectionHistory() {
+        const tbody = document.getElementById('remoteConnectionsBody');
+        if (!tbody) return;
+        const locale = getLocaleDictionary();
+        try {
+          const response = await fetch('/api/access/history', { cache: 'no-store' });
+          if (!response.ok) throw new Error('Unable to load remote connection history.');
+          const rows = await response.json();
+          if (!Array.isArray(rows) || !rows.length) {
+            return setAccessTableMessage(tbody, 9, locale.remoteConnectionsEmpty || 'No remote connection history.');
+          }
+          const statuses = {
+            pending: locale.remoteConnectionPending || 'Pending',
+            'code-issued': locale.remoteConnectionCodeIssued || 'PIN issued',
+            active: locale.remoteConnectionActive || 'Active',
+            rejected: locale.remoteConnectionRejected || 'Rejected',
+            locked: locale.remoteConnectionLocked || 'Locked',
+            'logged-out': locale.remoteConnectionLoggedOut || 'Logged out',
+            revoked: locale.remoteConnectionRevoked || 'Revoked',
+            expired: locale.remoteConnectionExpired || 'Expired',
+            interrupted: locale.remoteConnectionInterrupted || 'Interrupted'
+          };
+          const formatDate = (value) => value ? new Date(value).toLocaleString() : '—';
+          const formatActor = (value) => {
+            if (!value) return '—';
+            if (value.startsWith('Remote user')) return locale.remoteActorUser || 'Remote user';
+            if (value === 'Local operator') return locale.remoteActorOperator || 'Local operator';
+            if (value.startsWith('System')) return `${locale.remoteActorSystem || 'System'}: ${value.slice(7).replace(/[()]/g, '')}`;
+            return value;
+          };
+          tbody.innerHTML = rows.map((row) => `<tr>
+            <td>${escapeHtml(formatDate(row.requestedAt))}</td>
+            <td>${escapeHtml(row.ip || '—')}</td>
+            <td>${escapeHtml(row.userAgent || '—')}</td>
+            <td>${escapeHtml(row.role === 'media' ? (locale.accessRoleMedia || 'Media Team') : row.role === 'lawyer' ? (locale.accessRoleLawyer || 'Lawyer Team') : '—')}</td>
+            <td>${escapeHtml(statuses[row.status] || row.status || '—')}</td>
+            <td>${escapeHtml(formatDate(row.startedAt))}</td>
+            <td>${escapeHtml(row.startedBy ? formatActor(row.startedBy) : (row.userAgent || 'Remote device'))}</td>
+            <td>${escapeHtml(formatDate(row.endedAt))}</td>
+            <td>${escapeHtml(formatActor(row.terminatedBy))}</td>
+          </tr>`).join('');
+        } catch (error) {
+          setAccessTableMessage(tbody, 9, locale.remoteConnectionsLoadFailed || 'Unable to load remote connection history.');
+        }
       }
 
       function setupDebugValidMessageTabs() {
@@ -3959,14 +4123,15 @@
         const locale = getLocaleDictionary();
         try {
           const response = await fetch('/api/irregularities');
-          const rows = await response.json();
-          irregularitiesRecords = Array.isArray(rows) ? rows : [];
+          const payload = await response.json();
+          irregularityAggregateCounts = Array.isArray(payload) ? null : payload.counts || null;
+          irregularitiesRecords = Array.isArray(payload) ? payload : Array.isArray(payload.records) ? payload.records : [];
           if (irregularitiesTreeBuiltForConfig !== cachedConfig) buildIrregularitiesTree(cachedConfig);
           else updateIrregularitiesTreeCounts();
           const filteredRows = irregularitiesRecords.filter(irregularityMatchesFilter);
           renderIrregularityRows(filteredRows);
         } catch (error) {
-          tbody.innerHTML = `<tr><td colspan="4" class="irregularity-empty">${escapeHtml(locale.irregularitiesEmpty || 'No irregularities reported.')}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="6" class="irregularity-empty">${escapeHtml(locale.irregularitiesEmpty || 'No irregularities reported.')}</td></tr>`;
         }
       }
 
@@ -3976,6 +4141,10 @@
       }
 
       function irregularityCount(filter) {
+        if (irregularityAggregateCounts) {
+          if (!filter || filter.type === 'all') return Number(irregularityAggregateCounts.all || 0);
+          return Number(irregularityAggregateCounts[filter.type]?.[String(filter.value)] || 0);
+        }
         return irregularitiesRecords.filter((row) => {
           if (!filter || filter.type === 'all') return true;
           return String(row && row[filter.type] || '') === String(filter.value);
@@ -4053,14 +4222,16 @@
         const locale = getLocaleDictionary();
         if (!rows.some((row) => String(row.id) === String(selectedIrregularityId))) selectedIrregularityId = null;
         if (!rows.length) {
-          tbody.innerHTML = `<tr><td colspan="5" class="irregularity-empty">${escapeHtml(locale.irregularitiesEmpty || 'No irregularities reported.')}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="6" class="irregularity-empty">${escapeHtml(locale.irregularitiesEmpty || 'No irregularities reported.')}</td></tr>`;
           updateIrregularityPreviewButton();
           return;
         }
         tbody.innerHTML = rows.map((row) => {
           const date = row.receivedAt ? new Date(row.receivedAt) : null;
           const checked = String(row.id) === String(selectedIrregularityId) ? ' checked' : '';
-          return `<tr data-irregularity-id="${escapeHtml(row.id)}"><td class="irregularity-select-cell"><input class="irregularity-select" type="checkbox" aria-label="Select irregularity" data-irregularity-id="${escapeHtml(row.id)}"${checked}></td><td>${escapeHtml(date ? date.toLocaleDateString() : '--')}</td><td>${escapeHtml(date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--')}</td><td>${escapeHtml(row.place || '--')}</td><td>${escapeHtml(row.explanation || '')}</td></tr>`;
+          const approved = row.approved === true ? ' checked' : '';
+          const approvalDisabled = remoteAccessMode && remoteAccessRole !== 'lawyer' ? ' disabled' : '';
+          return `<tr data-irregularity-id="${escapeHtml(row.id)}"><td class="irregularity-select-cell"><input class="irregularity-select" type="checkbox" aria-label="Select irregularity" data-irregularity-id="${escapeHtml(row.id)}"${checked}></td><td>${escapeHtml(date ? date.toLocaleDateString() : '--')}</td><td>${escapeHtml(date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--')}</td><td>${escapeHtml(row.place || '--')}</td><td>${escapeHtml(row.explanation || '')}</td><td><input class="irregularity-approval" type="checkbox" aria-label="Approve irregularity for Media Team" data-irregularity-id="${escapeHtml(row.id)}"${approved}${approvalDisabled}></td></tr>`;
         }).join('');
         updateIrregularityPreviewButton();
       }
@@ -4128,6 +4299,20 @@
         if (!tbody || tbody.dataset.ready) return;
         tbody.dataset.ready = '1';
         tbody.addEventListener('change', (event) => {
+          const approval = event.target.closest('.irregularity-approval');
+          if (approval) {
+            const recordId = approval.dataset.irregularityId;
+            approval.disabled = true;
+            fetch(`/api/irregularities/${encodeURIComponent(recordId)}/approval`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ approved: approval.checked })
+            }).then((response) => {
+              if (!response.ok) throw new Error('Unable to update approval.');
+              return refreshIrregularitiesTable();
+            }).catch(() => refreshIrregularitiesTable());
+            return;
+          }
           const checkbox = event.target.closest('.irregularity-select');
           if (!checkbox) return;
           selectedIrregularityId = checkbox.checked ? checkbox.dataset.irregularityId : null;
@@ -4457,6 +4642,10 @@
       }
 
       async function refreshZapRecords() {
+        if (remoteAccessMode && remoteAccessRole === 'media') {
+          zapRecords = [];
+          return;
+        }
         try { const response = await fetch('/api/zap-records'); zapRecords = await response.json(); if (zapTreeBuiltForConfig !== cachedConfig) buildZapTree(cachedConfig); else updateZapTreeCounts(); renderZapRecords(); } catch (error) { zapRecords = []; updateZapTreeCounts(); renderZapRecords(); }
       }
 
@@ -4496,6 +4685,7 @@
           const clearRawMessages = Boolean(document.getElementById('dbClearRawMessages')?.checked);
           const clearIrregularities = Boolean(document.getElementById('dbClearIrregularities')?.checked);
           const clearZapRecords = Boolean(document.getElementById('dbClearZapRecords')?.checked);
+          const clearRemoteConnections = Boolean(document.getElementById('dbClearRemoteConnections')?.checked);
           if (document.getElementById('dbClearSender')?.checked) operations.push('sender');
           if (document.getElementById('dbClearStatus')?.checked) operations.push('status');
           if (document.getElementById('dbClearTurnout')?.checked) operations.push('turnout');
@@ -4503,7 +4693,7 @@
           if (document.getElementById('dbClearCorrection')?.checked) operations.push('correction');
 
           const resultEl = document.getElementById('dbClearDataResult');
-          if (!operations.length && !clearRawMessages && !clearIrregularities && !clearZapRecords) {
+          if (!operations.length && !clearRawMessages && !clearIrregularities && !clearZapRecords && !clearRemoteConnections) {
             if (resultEl) resultEl.textContent = locale.dbClearNoneSelected || 'Select at least one option.';
             return;
           }
@@ -4511,6 +4701,7 @@
           if (clearRawMessages && !window.confirm(locale.dbClearRawMessagesConfirm || 'Delete all raw messages? This cannot be undone.')) return;
           if (clearIrregularities && !window.confirm(locale.dbClearIrregularitiesConfirm || 'Delete all irregularities? This cannot be undone.')) return;
           if (clearZapRecords && !window.confirm(locale.dbClearZapRecordsConfirm || 'Delete all polling station records? This cannot be undone.')) return;
+          if (clearRemoteConnections && !window.confirm(locale.dbClearRemoteConnectionsConfirm || 'Delete remote session login history? This cannot be undone.')) return;
 
           try {
             if (operations.length) {
@@ -4535,6 +4726,13 @@
               const data = await response.json();
               if (!response.ok) throw new Error(data.error || 'Polling station records delete failed');
               await refreshZapRecords();
+            }
+
+            if (clearRemoteConnections) {
+              const response = await fetch('/api/access/history', { method: 'DELETE' });
+              const data = await response.json();
+              if (!response.ok) throw new Error(data.error || 'Remote connection history delete failed');
+              await refreshRemoteConnectionHistory();
             }
 
             if (clearRawMessages) {
@@ -4762,20 +4960,14 @@
         const locale = getLocaleDictionary();
         const incomingEmpty = locale.signalEmptyIncoming || 'No incoming messages for this group yet.';
         const outgoingEmpty = locale.signalEmptyOutgoing || 'No outgoing messages for this group yet.';
-        const selectedGroupId = document.getElementById('signalGroupSelect')?.value || '';
+        const rows = Array.isArray(allMessages) ? allMessages : [];
 
-        const groupScopedRows = (allMessages || []).filter((message) => {
-          if (!selectedGroupId) return true;
-          if (!message.groupId) return true;
-          return message.groupId === selectedGroupId;
-        });
-
-        rebuildDebugMessageFilterOptions(groupScopedRows);
-        const incomingRows = applyDebugMessageFilters(groupScopedRows
+        rebuildDebugMessageFilterOptions(rows);
+        const incomingRows = applyDebugMessageFilters(rows
           .filter((message) => (message.direction || 'incoming') === 'incoming')
           .sort((a, b) => new Date(b.receivedAt || b.createdAt || 0) - new Date(a.receivedAt || a.createdAt || 0)), false);
 
-        const outgoingRows = applyDebugMessageFilters(groupScopedRows
+        const outgoingRows = applyDebugMessageFilters(rows
           .filter((message) => (message.direction || 'incoming') === 'outgoing')
           .sort((a, b) => new Date(b.receivedAt || b.createdAt || 0) - new Date(a.receivedAt || a.createdAt || 0)), true);
 
@@ -5173,22 +5365,13 @@
           signalMessagesCache = Array.isArray(payload) ? payload : [];
           debugValidMessagesCache = signalMessagesCache.slice();
 
-          const groupSelect = document.getElementById('signalGroupSelect');
-          const selectedGroupId = groupSelect ? groupSelect.value : '';
-          const groupScopedRows = signalMessagesCache
-            .filter((message) => {
-              if (!selectedGroupId) return true;
-              if (!message.groupId) return true;
-              return message.groupId === selectedGroupId;
-            });
+          rebuildSignalFilterOptions(signalMessagesCache);
 
-          rebuildSignalFilterOptions(groupScopedRows);
-
-          const incomingRows = applySignalFilters(groupScopedRows
+          const incomingRows = applySignalFilters(signalMessagesCache
             .filter((message) => (message.direction || 'incoming') === 'incoming')
             .sort((a, b) => new Date(b.receivedAt || b.createdAt || 0) - new Date(a.receivedAt || a.createdAt || 0)), false);
 
-          const outgoingRows = applySignalFilters(groupScopedRows
+          const outgoingRows = applySignalFilters(signalMessagesCache
             .filter((message) => (message.direction || 'incoming') === 'outgoing')
             .sort((a, b) => new Date(b.receivedAt || b.createdAt || 0) - new Date(a.receivedAt || a.createdAt || 0)), true);
 
@@ -5277,8 +5460,7 @@
       async function refreshSignalPanel() {
         const statusEl = document.getElementById('signalStatusBadge');
         const summaryEl = document.getElementById('signalSummary');
-        const selectEl = document.getElementById('signalGroupSelect');
-        if (!statusEl || !summaryEl || !selectEl) return;
+        if (!statusEl || !summaryEl) return;
 
         try {
           const configRes = await fetch('/api/signal/config');
@@ -5300,18 +5482,11 @@
           statusEl.classList.toggle('connected', Boolean(status.connected));
           statusEl.classList.toggle('disconnected', !status.connected);
 
-          selectEl.innerHTML = '';
           const locale = getLocaleDictionary();
-          const placeholder = locale.signalGroupPlaceholder || '-- Select group --';
           const bridgeLabel = locale.signalBridgeLabel || 'Bridge';
           const countdownLabel = locale.signalCountdownLabel || 'Next check';
           const messageLabel = locale.signalMessageLabel || 'Message';
           if (!status.connected) {
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = '';
-            option.selected = true;
-            selectEl.appendChild(option);
             const offlineMessage = locale.signalOfflineMessage || 'Please start Signal App on this computer.';
             statusEl.textContent = `${status.connected ? 'Signal OK' : 'Signal offline'} — ${offlineMessage}`;
             summaryEl.innerHTML = `
@@ -5322,11 +5497,6 @@
             return;
           }
           if (!groups.length) {
-            const option = document.createElement('option');
-            option.value = '';
-            option.textContent = placeholder;
-            option.selected = true;
-            selectEl.appendChild(option);
             summaryEl.innerHTML = `
               <strong>${bridgeLabel}:</strong> connected<br>
               <strong>${countdownLabel}:</strong> ${formatSignalCountdown(status.lastCheck, heartbeatMs)}
@@ -5334,21 +5504,6 @@
             await refreshSignalMessageTables();
             return;
           }
-
-          const blankOption = document.createElement('option');
-          blankOption.value = '';
-          blankOption.textContent = placeholder;
-          blankOption.selected = !status.selectedGroupId;
-          selectEl.appendChild(blankOption);
-
-          const selected = status.selectedGroupId || '';
-          groups.forEach((group) => {
-            const option = document.createElement('option');
-            option.value = group.id;
-            option.textContent = group.name;
-            option.selected = group.id === selected;
-            selectEl.appendChild(option);
-          });
 
           summaryEl.innerHTML = `
             <strong>${bridgeLabel}:</strong> connected<br>
@@ -5397,6 +5552,8 @@
           setupSignalColumnToggles();
           setupSignalFilterControls();
         }
+        setupTurnoutTabs();
+        setupResultsTabs();
         setupIrregularitySelection();
         setupZapSelection();
         setupIrregularityPreviewModal();
@@ -5416,20 +5573,6 @@
         await refreshIrregularitiesTable();
         await refreshZapRecords();
         setupIrregularitiesSplitter();
-        if (!remoteAccessMode) document.getElementById('signalGroupSelect')?.addEventListener('change', async (event) => {
-          const groupId = event.target.value;
-          if (!groupId) {
-            await refreshSignalMessageTables();
-            return;
-          }
-          await fetch('/api/signal/select-group', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ groupId })
-          });
-          await refreshSignalPanel();
-          await refreshSignalMessageTables();
-        });
         await loadConfigAndBuild();
         enforceRemoteDashboardView();
         syncElectionPhaseControls();
