@@ -4204,9 +4204,21 @@
             renderFilteredIrregularitiesTable();
           }
           if (document.getElementById('panel-zap-records')?.classList.contains('active-panel')) renderZapRecords();
+          closePreviewIfClaimLost();
         } catch (error) {
           console.warn('Unable to refresh record coordination:', error.message);
         }
+      }
+
+      function closePreviewIfClaimLost() {
+        const modal = document.getElementById('irregularityPreviewModal');
+        const documentEl = document.getElementById('irregularityPreviewDocument');
+        if (!modal || modal.hidden || !documentEl || !documentEl.dataset.recordId || !recordCoordinationState.ownerId) return;
+        const type = documentEl.dataset.previewType === 'zap' ? 'zap-record' : 'irregularity';
+        const claim = recordClaimFor(type, documentEl.dataset.recordId);
+        if (claim && claim.ownerId === recordCoordinationState.ownerId) return;
+        document.getElementById('irregularityPreviewCloseBtn')?.click();
+        window.alert(getLocaleDictionary().recordClaimLost || 'This record is now open by another user or your claim expired. The preview was closed.');
       }
 
       async function updateRecordClaim(type, recordId, action, lawyerName = '') {
@@ -4217,6 +4229,10 @@
         });
         const result = await response.json().catch(() => ({}));
         if (!response.ok || (action === 'claim' && !result.ok)) {
+          if (result.reason === 'record-already-claimed') {
+            const holder = result.claim && (result.claim.ownerName || result.claim.role) || 'another client';
+            throw new Error((getLocaleDictionary().recordClaimUnavailable || 'This record is already open by {owner}.').replace('{owner}', holder));
+          }
           throw new Error(result.reason || result.error || 'Could not update record claim.');
         }
         await refreshRecordCoordination();
@@ -4245,6 +4261,10 @@
         }
       }
 
+      function isMediaViewer() {
+        return remoteAccessMode && remoteAccessRole === 'media';
+      }
+
       function recordClaimControl(type, recordId, selected) {
         const claim = recordClaimFor(type, recordId);
         const owned = Boolean(claim && claim.ownerId === recordCoordinationState.ownerId);
@@ -4261,7 +4281,7 @@
       function lawyerAssignmentControl(recordType, row) {
         const claim = recordClaimFor(recordType, row.id);
         const unavailable = Boolean(claim && claim.ownerId !== recordCoordinationState.ownerId);
-        const disabled = unavailable ? ' disabled' : '';
+        const disabled = unavailable || isMediaViewer() ? ' disabled' : '';
         const locale = getLocaleDictionary();
         const label = locale.recordLawyerHeader || 'Lawyer Team';
         const placeholder = locale.recordNewLawyerName || '--New Name--';
@@ -4291,7 +4311,7 @@
           const response = await fetch('/api/record-coordination/lawyer-assignment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: recordType, recordId, lawyerName })
+            body: JSON.stringify({ type: recordType, recordId, lawyerName, clientId: recordClientId })
           });
           if (!response.ok) throw new Error('Unable to assign Lawyer Team member.');
           const result = await response.json();
@@ -4541,6 +4561,7 @@
           refreshRecordCoordination();
           return;
         }
+        const readOnly = isMediaViewer();
         const locale = getLocaleDictionary();
         const date = record.receivedAt ? new Date(record.receivedAt) : null;
         const dateText = date ? `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}` : '--';
@@ -4559,8 +4580,11 @@
           documentEl.dataset.severity = String(normalizeIrregularityCategory('severity', record.severity));
           document.querySelectorAll('.irregularity-preview-category-select').forEach((select) => { select.hidden = false; });
           const institutionText = locale.irregularitiesInstitution || 'Републичка изборна комисија\nКраља Милана 14\n11000 Београд, Србија';
-          documentEl.innerHTML = `<div class="category-summary">${renderIrregularityCategorySummary(record, locale)}</div><div class="report-institution">${escapeHtml(institutionText)}</div><div class="subject"><strong>${escapeHtml(locale.irregularitiesSubject || 'Subject:')}</strong> ${escapeHtml(locale.irregularitiesSubjectText || 'Report of an irregularity at a polling station.')}</div><section class="location"><div><strong>${escapeHtml(locale.irregularitiesRegion || 'Region')}:</strong> ${escapeHtml(record.region || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesMunicipality || 'Municipality')}:</strong> ${escapeHtml(record.municipality || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesPlace || 'Voting place')}:</strong> ${escapeHtml(record.place || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesDateTime || 'Date and time')}:</strong> ${escapeHtml(dateText)}</div></section><div class="description-label">${escapeHtml(locale.irregularitiesDescriptionHeading || 'Irregularity description:')}</div><div class="description" contenteditable="true" role="textbox" aria-multiline="true">${escapeHtml(record.explanation || '')}</div>${imageUrl ? `<div class="photo-frame"><img class="photo" src="${imageUrl}" alt="${escapeHtml(locale.irregularitiesPhoto || 'Photo')}"><button class="photo-resize-handle" type="button" aria-label="Resize photo" title="Resize photo"></button></div>` : ''}`;
+          documentEl.innerHTML = `<div class="category-summary">${renderIrregularityCategorySummary(record, locale)}</div><div class="report-institution">${escapeHtml(institutionText)}</div><div class="subject"><strong>${escapeHtml(locale.irregularitiesSubject || 'Subject:')}</strong> ${escapeHtml(locale.irregularitiesSubjectText || 'Report of an irregularity at a polling station.')}</div><section class="location"><div><strong>${escapeHtml(locale.irregularitiesRegion || 'Region')}:</strong> ${escapeHtml(record.region || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesMunicipality || 'Municipality')}:</strong> ${escapeHtml(record.municipality || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesPlace || 'Voting place')}:</strong> ${escapeHtml(record.place || '--')}</div><div><strong>${escapeHtml(locale.irregularitiesDateTime || 'Date and time')}:</strong> ${escapeHtml(dateText)}</div></section><div class="description-label">${escapeHtml(locale.irregularitiesDescriptionHeading || 'Irregularity description:')}</div><div class="description" contenteditable="${readOnly ? 'false' : 'true'}" role="textbox" aria-multiline="true"${readOnly ? ' aria-readonly="true"' : ''}>${escapeHtml(record.explanation || '')}</div>${imageUrl ? `<div class="photo-frame"><img class="photo" src="${imageUrl}" alt="${escapeHtml(locale.irregularitiesPhoto || 'Photo')}"><button class="photo-resize-handle" type="button" aria-label="Resize photo" title="Resize photo"></button></div>` : ''}`;
           setIrregularityCategoryControls(record);
+          document.querySelectorAll('.irregularity-preview-category-select').forEach((select) => { select.disabled = readOnly; });
+          const previewSaveButton = document.getElementById('irregularityPreviewSaveBtn');
+          if (previewSaveButton) previewSaveButton.hidden = readOnly;
           const description = documentEl.querySelector('.description');
           setupPreviewPhotoFrame(documentEl, description);
           modal.hidden = false;
@@ -4612,6 +4636,7 @@
           if (!documentEl) return;
           const recordId = documentEl.dataset.recordId;
           const previewType = documentEl.dataset.previewType;
+          if (isMediaViewer()) return;
           const saveButton = document.getElementById('irregularityPreviewSaveBtn');
           const locale = getLocaleDictionary();
           const originalText = saveButton?.textContent || locale.irregularitiesSave || 'Save';
@@ -4627,6 +4652,7 @@
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                  clientId: recordClientId,
                   region: record.region,
                   municipality: record.municipality,
                   place: record.place,
@@ -4648,13 +4674,21 @@
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
+                clientId: recordClientId,
                 explanation: description.innerText.replace(/\u00a0/g, ' ').trim(),
                 urgency: normalizeIrregularityCategory('urgency', documentEl.dataset.urgency),
                 violation: normalizeIrregularityCategory('violation', documentEl.dataset.violation),
                 severity: normalizeIrregularityCategory('severity', documentEl.dataset.severity)
               })
             });
-            if (!response.ok) throw new Error(`Save failed: ${response.status}`);
+            if (!response.ok) {
+              if (response.status === 409) {
+                document.getElementById('irregularityPreviewCloseBtn')?.click();
+                window.alert(locale.recordClaimLost || 'This record is now open by another user or your claim expired. The preview was closed.');
+                refreshRecordCoordination();
+              }
+              throw new Error(`Save failed: ${response.status}`);
+            }
             const payload = await response.json();
             const index = irregularitiesRecords.findIndex((row) => String(row.id) === String(recordId));
             if (index >= 0) irregularitiesRecords[index] = payload.record;
@@ -5842,6 +5876,7 @@
         setInterval(refreshIrregularitiesTable, 5000);
         setInterval(refreshZapRecords, 5000);
         setInterval(renewOwnedRecordClaims, 30000);
+        setInterval(refreshRecordCoordination, 3000);
         if (!remoteAccessMode) setInterval(refreshSignalPanel, 8000);
         if (remoteAccessMode) setInterval(syncSharedDashboardState, 5000);
         setInterval(updateSignalCountdownDisplay, 1000);

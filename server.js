@@ -2824,6 +2824,14 @@ function getRecordClaimOwner(req, clientId) {
   return { ownerId: `local:${normalizedClientId}`, role: 'it' };
 }
 
+function recordClaimConflict(req, type, recordId, clientId, requireOwnClaim) {
+  const owner = getRecordClaimOwner(req, clientId);
+  const claim = recordCoordination.list().claims.find((item) => item.key === `${type}:${recordId}`);
+  if (claim && (!owner || claim.ownerId !== owner.ownerId)) return { error: 'record-claimed-by-another', claim };
+  if (!claim && requireOwnClaim) return { error: 'record-not-claimed' };
+  return null;
+}
+
 app.get('/api/record-coordination', (req, res) => {
   const owner = getRecordClaimOwner(req, req.query.clientId);
   if (!owner) return res.status(400).json({ error: 'client-id-required' });
@@ -2832,6 +2840,9 @@ app.get('/api/record-coordination', (req, res) => {
 });
 
 app.post('/api/record-coordination/claims', (req, res) => {
+  if (isMediaRole(req.remoteAccessRole) && (req.body || {}).type !== 'irregularity') {
+    return res.status(403).json({ ok: false, error: 'media-role-irregularities-only' });
+  }
   const body = req.body || {};
   const owner = getRecordClaimOwner(req, body.clientId);
   if (!owner) return res.status(400).json({ ok: false, error: 'client-id-required' });
@@ -2876,6 +2887,8 @@ app.post('/api/record-coordination/lawyer-assignment', (req, res) => {
   const records = type === 'irregularity' ? loadIrregularities() : loadZapRecords();
   const record = records.find((item) => String(item.id) === recordId);
   if (!record) return res.status(404).json({ ok: false, error: 'record-not-found' });
+  const conflict = recordClaimConflict(req, type, recordId, req.body && req.body.clientId, false);
+  if (conflict) return res.status(409).json({ ok: false, ...conflict });
   record.lawyerName = lawyerName;
   record.editedAt = new Date().toISOString();
   if (lawyerName) recordCoordination.assignLawyerName(lawyerName);
@@ -2921,6 +2934,8 @@ app.patch('/api/irregularities/:id', (req, res) => {
   const record = records.find((item) => String(item.id) === String(req.params.id));
   if (!record) return res.status(404).json({ ok: false, error: 'irregularity-not-found' });
   if (typeof req.body?.explanation !== 'string') return res.status(400).json({ ok: false, error: 'invalid-explanation' });
+  const conflict = recordClaimConflict(req, 'irregularity', req.params.id, req.body.clientId, true);
+  if (conflict) return res.status(409).json({ ok: false, ...conflict });
   record.explanation = req.body.explanation;
   record.urgency = normalizeIrregularityCategory(req.body.urgency, 3);
   record.violation = normalizeIrregularityCategory(req.body.violation, 4);
@@ -2965,6 +2980,8 @@ app.patch('/api/zap-records/:id', (req, res) => {
   const records = loadZapRecords();
   const record = records.find((item) => String(item.id) === String(req.params.id));
   if (!record) return res.status(404).json({ ok: false, error: 'zap-record-not-found' });
+  const conflict = recordClaimConflict(req, 'zap-record', req.params.id, req.body && req.body.clientId, true);
+  if (conflict) return res.status(409).json({ ok: false, ...conflict });
 
   if (req.body && typeof req.body.region !== 'undefined') record.region = String(req.body.region || '');
   if (req.body && typeof req.body.municipality !== 'undefined') record.municipality = String(req.body.municipality || '');
