@@ -205,6 +205,7 @@ function createAccessControl(options = {}) {
     const { session } = found;
     return {
       role: session.role || 'lawyer',
+      requestId: session.requestId,
       expiresAt: Math.min(session.lastSeenAt + SESSION_IDLE_TTL_MS, session.maxExpiresAt),
       renewRequired: session.maxExpiresAt - now() <= SESSION_RENEW_PROMPT_MS
     };

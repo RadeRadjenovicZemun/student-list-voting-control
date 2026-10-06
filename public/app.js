@@ -1,6 +1,21 @@
 
       let cachedConfig = null;
       let remoteAccessMode = false;
+      // Any API reply showing revoked or missing approval sends a remote client away immediately.
+      const nativeFetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const response = await nativeFetch(...args);
+        if (remoteAccessMode && String(args[0]).startsWith('/api/')) {
+          if (response.status === 403) {
+            const body = await response.clone().json().catch(() => ({}));
+            if (body.error === 'access-revoked') { remoteAccessMode = false; location.replace('/access/revoked'); }
+          } else if (response.status === 401) {
+            remoteAccessMode = false;
+            location.replace('/');
+          }
+        }
+        return response;
+      };
       let remoteAccessRole = null;
       let remoteResultsLocked = true;
       let remoteResultsUnlockAt = '20:00';
@@ -32,6 +47,21 @@
       let resultsChartSplitRatio = 1 / 3;
       let irregularitiesRecords = [];
       let irregularityAggregateCounts = null;
+      let recordCoordinationState = { claims: [], lawyerNames: [], ownerId: null };
+      const recordClientId = (() => {
+        // crypto.randomUUID is missing on non-secure (plain HTTP LAN) pages.
+        const create = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+        try {
+          let id = localStorage.getItem('recordCoordinationClientId');
+          if (!id) {
+            id = create();
+            localStorage.setItem('recordCoordinationClientId', id);
+          }
+          return id;
+        } catch (error) {
+          return create();
+        }
+      })();
       let irregularitiesFilter = { type: 'all', value: 'all' };
       let irregularitiesTreeBuiltForConfig = null;
       let selectedIrregularityId = null;
@@ -221,6 +251,8 @@
           const activeControllersLabel = cards.querySelector('.coverage-active');
           if (registeredControllersLabel && locale.registeredControllers) registeredControllersLabel.textContent = locale.registeredControllers;
           if (activeControllersLabel && locale.activeControllers) activeControllersLabel.textContent = locale.activeControllers;
+          const nonCoveredLabel = cards.querySelector('.coverage-non-covered');
+          if (nonCoveredLabel && locale.nonCoveredPlaces) nonCoveredLabel.textContent = locale.nonCoveredPlaces;
         }
 
         const resultsCards = document.getElementById('resultsRegionCards');
@@ -333,6 +365,11 @@
           const element = document.getElementById(id);
           if (element) element.textContent = text;
         });
+        const lawyerHeader = locale.recordLawyerHeader || 'Lawyer Team';
+        const irregularitiesLawyerHeader = document.getElementById('irregularitiesLawyerHeader');
+        const zapLawyerHeader = document.getElementById('zapLawyerHeader');
+        if (irregularitiesLawyerHeader) irregularitiesLawyerHeader.textContent = lawyerHeader;
+        if (zapLawyerHeader) zapLawyerHeader.textContent = lawyerHeader;
 
         const debugMessageFilterLabel = document.getElementById('debugMessageFilterLabel');
         if (debugMessageFilterLabel) debugMessageFilterLabel.textContent = locale.signalColumnFilterLabel || 'Filter';
@@ -400,6 +437,8 @@
         if (dbClearZapRecordsLabel) dbClearZapRecordsLabel.textContent = locale.dbClearZapRecords || 'Delete All Polling Station Records';
         const dbClearRemoteConnectionsLabel = document.getElementById('dbClearRemoteConnectionsLabel');
         if (dbClearRemoteConnectionsLabel) dbClearRemoteConnectionsLabel.textContent = locale.dbClearRemoteConnections || 'Delete Remote Session Logins';
+        const dbClearLawyerNamesLabel = document.getElementById('dbClearLawyerNamesLabel');
+        if (dbClearLawyerNamesLabel) dbClearLawyerNamesLabel.textContent = locale.dbClearLawyerNames || 'Delete All Lawyer Team Names';
 
         const settingsStopwatchTab = document.querySelector('[data-settings-tab="settings-tab-stopwatch"]');
         if (settingsStopwatchTab) {
@@ -1003,7 +1042,7 @@
           }
         };
         heartbeat();
-        heartbeatTimer = setInterval(heartbeat, 20000);
+        heartbeatTimer = setInterval(heartbeat, 5000);
       }
       function accessLocaleText(key, fallback, values = {}) {
         let text = String(getLocaleDictionary()[key] || fallback);
@@ -2550,6 +2589,12 @@
             <strong id="activeControllers">0</strong>
             <span class="coverage-percent" id="activeControllersPercent">(0.00%)</span>
           </div>
+          <div class="coverage-row">
+            <span class="coverage-label coverage-non-covered">${locale.nonCoveredPlaces || 'Non covered'}</span>
+            <span class="coverage-colon">:</span>
+            <strong id="nonCoveredPlaces">0</strong>
+            <span class="coverage-percent" id="nonCoveredPlacesPercent">(0.00%)</span>
+          </div>
         `;
         regionCards.appendChild(card5);
 
@@ -2872,6 +2917,12 @@
             <span class="coverage-colon">:</span>
             <strong id="resultsActiveControllers">0</strong>
             <span class="coverage-percent" id="resultsActiveControllersPercent">(0.00%)</span>
+          </div>
+          <div class="coverage-row">
+            <span class="coverage-label coverage-non-covered">${locale.nonCoveredPlaces || 'Non covered'}</span>
+            <span class="coverage-colon">:</span>
+            <strong id="resultsNonCoveredPlaces">0</strong>
+            <span class="coverage-percent" id="resultsNonCoveredPlacesPercent">(0.00%)</span>
           </div>
         `;
         resultsCards.appendChild(card5);
@@ -3422,6 +3473,13 @@
             const pct = totalVotingPlaces > 0 ? (Number(configTotals.activeControllers || 0) / Number(totalVotingPlaces)) * 100 : 0;
             activeControllersPercentEl.textContent = `(${pct.toFixed(2)}%)`;
           }
+          {
+            const nonCovered = Math.max(0, totalVotingPlaces - Number(configTotals.registeredControllers || 0));
+            const nonCoveredEl = document.getElementById('resultsNonCoveredPlaces');
+            const nonCoveredPercentEl = document.getElementById('resultsNonCoveredPlacesPercent');
+            if (nonCoveredEl) nonCoveredEl.textContent = formatNumber(nonCovered);
+            if (nonCoveredPercentEl) nonCoveredPercentEl.textContent = `(${(totalVotingPlaces > 0 ? (nonCovered / totalVotingPlaces) * 100 : 0).toFixed(2)}%)`;
+          }
           if (totalPctEl) {
             const pct = totalRegistered > 0 ? (Number(totalCollected) / Number(totalRegistered)) * 100 : 0;
             totalPctEl.textContent = `(${pct.toFixed(2)}%)`;
@@ -3834,6 +3892,13 @@
           const pct = totalVotingPlaces > 0 ? (Number(configTotals.activeControllers || 0) / Number(totalVotingPlaces)) * 100 : 0;
           activeControllersPercentEl.textContent = `(${pct.toFixed(2)}%)`;
         }
+        {
+          const nonCovered = Math.max(0, totalVotingPlaces - Number(configTotals.registeredControllers || 0));
+          const nonCoveredEl = document.getElementById('nonCoveredPlaces');
+          const nonCoveredPercentEl = document.getElementById('nonCoveredPlacesPercent');
+          if (nonCoveredEl) nonCoveredEl.textContent = formatNumber(nonCovered);
+          if (nonCoveredPercentEl) nonCoveredPercentEl.textContent = `(${(totalVotingPlaces > 0 ? (nonCovered / totalVotingPlaces) * 100 : 0).toFixed(2)}%)`;
+        }
         if (totalPctEl) {
           const pct = totalRegistered > 0 ? (Number(totalCollected) / Number(totalRegistered)) * 100 : 0;
           totalPctEl.textContent = `(${pct.toFixed(2)}%)`;
@@ -4117,6 +4182,129 @@
         }
       }
 
+      function recordClaimKey(type, recordId) {
+        return `${type}:${recordId}`;
+      }
+
+      function recordClaimFor(type, recordId) {
+        return recordCoordinationState.claims.find((claim) => claim.key === recordClaimKey(type, recordId)) || null;
+      }
+
+      async function refreshRecordCoordination() {
+        try {
+          const response = await fetch(`/api/record-coordination?clientId=${encodeURIComponent(recordClientId)}`, { cache: 'no-store' });
+          if (!response.ok) return;
+          recordCoordinationState = await response.json();
+          const datalist = document.getElementById('lawyerTeamNames');
+          if (datalist) {
+            datalist.innerHTML = ['--New Name--', ...recordCoordinationState.lawyerNames]
+              .map((name) => `<option value="${escapeHtml(name)}"></option>`).join('');
+          }
+          if (document.getElementById('panel-irregularities')?.classList.contains('active-panel')) {
+            renderFilteredIrregularitiesTable();
+          }
+          if (document.getElementById('panel-zap-records')?.classList.contains('active-panel')) renderZapRecords();
+        } catch (error) {
+          console.warn('Unable to refresh record coordination:', error.message);
+        }
+      }
+
+      async function updateRecordClaim(type, recordId, action, lawyerName = '') {
+        const response = await fetch('/api/record-coordination/claims', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, recordId, action, clientId: recordClientId, lawyerName })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || (action === 'claim' && !result.ok)) {
+          throw new Error(result.reason || result.error || 'Could not update record claim.');
+        }
+        await refreshRecordCoordination();
+        return result;
+      }
+
+      async function renewOwnedRecordClaims() {
+        await refreshRecordCoordination();
+        const ownedClaims = recordCoordinationState.claims.filter((claim) => claim.ownerId === recordCoordinationState.ownerId);
+        for (const claim of ownedClaims) {
+          try {
+            await fetch('/api/record-coordination/claims', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'claim',
+                type: claim.type,
+                recordId: claim.recordId,
+                clientId: recordClientId,
+                lawyerName: claim.ownerName
+              })
+            });
+          } catch (error) {
+            console.warn('Unable to renew record claim:', error.message);
+          }
+        }
+      }
+
+      function recordClaimControl(type, recordId, selected) {
+        const claim = recordClaimFor(type, recordId);
+        const owned = Boolean(claim && claim.ownerId === recordCoordinationState.ownerId);
+        const unavailable = Boolean(claim && !owned);
+        const owner = claim && (claim.ownerName || (claim.role === 'media' ? 'Media Team' : claim.role === 'lawyer' ? 'Lawyer Team' : 'IT Team'));
+        const checked = selected || owned ? ' checked' : '';
+        const disabled = unavailable ? ' disabled' : '';
+        const title = unavailable
+          ? (getLocaleDictionary().recordClaimUnavailable || 'This record is already open by {owner}.').replace('{owner}', owner || 'another client')
+          : 'Open this record';
+        return `<input class="record-open-claim" type="checkbox" aria-label="Open record" data-record-type="${type}" data-record-id="${escapeHtml(recordId)}" title="${title}"${checked}${disabled}>`;
+      }
+
+      function lawyerAssignmentControl(recordType, row) {
+        const claim = recordClaimFor(recordType, row.id);
+        const unavailable = Boolean(claim && claim.ownerId !== recordCoordinationState.ownerId);
+        const disabled = unavailable ? ' disabled' : '';
+        const locale = getLocaleDictionary();
+        const label = locale.recordLawyerHeader || 'Lawyer Team';
+        const placeholder = locale.recordNewLawyerName || '--New Name--';
+        const current = String(row.lawyerName || '');
+        const names = [...new Set([...recordCoordinationState.lawyerNames, ...(current ? [current] : [])])];
+        const options = [
+          `<option value=""${current ? '' : ' selected'}>${escapeHtml(placeholder)}</option>`,
+          ...names.map((name) => `<option value="${escapeHtml(name)}"${name === current ? ' selected' : ''}>${escapeHtml(name)}</option>`)
+        ].join('');
+        return `<select class="record-lawyer-assignment" data-record-type="${recordType}" data-record-id="${escapeHtml(row.id)}" aria-label="${label}"${disabled}>${options}</select>`;
+      }
+
+      async function saveRecordLawyerAssignment(input) {
+        const recordType = input.dataset.recordType;
+        const recordId = input.dataset.recordId;
+        let lawyerName = input.value.trim();
+        const newNameOption = getLocaleDictionary().recordNewLawyerName || '--New Name--';
+        if (!lawyerName || lawyerName === newNameOption || lawyerName === '--New Name--') {
+          const entered = window.prompt('Enter Lawyer Team member name (leave empty to clear the assignment):');
+          if (entered === null) {
+            await (recordType === 'irregularity' ? refreshIrregularitiesTable() : refreshZapRecords());
+            return;
+          }
+          lawyerName = entered.trim();
+        }
+        try {
+          const response = await fetch('/api/record-coordination/lawyer-assignment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: recordType, recordId, lawyerName })
+          });
+          if (!response.ok) throw new Error('Unable to assign Lawyer Team member.');
+          const result = await response.json();
+          const rows = recordType === 'irregularity' ? irregularitiesRecords : zapRecords;
+          const index = rows.findIndex((row) => String(row.id) === String(recordId));
+          if (index >= 0) rows[index] = result.record;
+          await refreshRecordCoordination();
+        } catch (error) {
+          window.alert(error.message);
+          await (recordType === 'irregularity' ? refreshIrregularitiesTable() : refreshZapRecords());
+        }
+      }
+
       async function refreshIrregularitiesTable() {
         const tbody = document.getElementById('irregularitiesBody');
         if (!tbody) return;
@@ -4220,9 +4408,11 @@
         const tbody = document.getElementById('irregularitiesBody');
         if (!tbody) return;
         const locale = getLocaleDictionary();
+        const ownedClaim = recordCoordinationState.claims.find((claim) => claim.type === 'irregularity' && claim.ownerId === recordCoordinationState.ownerId);
+        if (!selectedIrregularityId && ownedClaim) selectedIrregularityId = ownedClaim.recordId;
         if (!rows.some((row) => String(row.id) === String(selectedIrregularityId))) selectedIrregularityId = null;
         if (!rows.length) {
-          tbody.innerHTML = `<tr><td colspan="6" class="irregularity-empty">${escapeHtml(locale.irregularitiesEmpty || 'No irregularities reported.')}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="7" class="irregularity-empty">${escapeHtml(locale.irregularitiesEmpty || 'No irregularities reported.')}</td></tr>`;
           updateIrregularityPreviewButton();
           return;
         }
@@ -4231,7 +4421,7 @@
           const checked = String(row.id) === String(selectedIrregularityId) ? ' checked' : '';
           const approved = row.approved === true ? ' checked' : '';
           const approvalDisabled = remoteAccessMode && remoteAccessRole !== 'lawyer' ? ' disabled' : '';
-          return `<tr data-irregularity-id="${escapeHtml(row.id)}"><td class="irregularity-select-cell"><input class="irregularity-select" type="checkbox" aria-label="Select irregularity" data-irregularity-id="${escapeHtml(row.id)}"${checked}></td><td>${escapeHtml(date ? date.toLocaleDateString() : '--')}</td><td>${escapeHtml(date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--')}</td><td>${escapeHtml(row.place || '--')}</td><td>${escapeHtml(row.explanation || '')}</td><td><input class="irregularity-approval" type="checkbox" aria-label="Approve irregularity for Media Team" data-irregularity-id="${escapeHtml(row.id)}"${approved}${approvalDisabled}></td></tr>`;
+          return `<tr data-irregularity-id="${escapeHtml(row.id)}"><td class="irregularity-select-cell">${recordClaimControl('irregularity', row.id, checked.trim() !== '')}</td><td>${escapeHtml(date ? date.toLocaleDateString() : '--')}</td><td>${escapeHtml(date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--')}</td><td>${escapeHtml(row.place || '--')}</td><td>${escapeHtml(row.explanation || '')}</td><td><input class="irregularity-approval" type="checkbox" aria-label="Approve irregularity for Media Team" data-irregularity-id="${escapeHtml(row.id)}"${approved}${approvalDisabled}></td><td>${lawyerAssignmentControl('irregularity', row)}</td></tr>`;
         }).join('');
         updateIrregularityPreviewButton();
       }
@@ -4313,10 +4503,26 @@
             }).catch(() => refreshIrregularitiesTable());
             return;
           }
-          const checkbox = event.target.closest('.irregularity-select');
-          if (!checkbox) return;
-          selectedIrregularityId = checkbox.checked ? checkbox.dataset.irregularityId : null;
-          renderFilteredIrregularitiesTable();
+          const claimCheckbox = event.target.closest('.record-open-claim');
+          if (claimCheckbox) {
+            const recordId = claimCheckbox.dataset.recordId;
+            claimCheckbox.disabled = true;
+            updateRecordClaim('irregularity', recordId, claimCheckbox.checked ? 'claim' : 'release')
+              .then(() => {
+                selectedIrregularityId = claimCheckbox.checked ? recordId : null;
+                renderFilteredIrregularitiesTable();
+              })
+              .catch((error) => {
+                window.alert(error.message);
+                refreshRecordCoordination();
+              });
+            return;
+          }
+          const lawyerInput = event.target.closest('.record-lawyer-assignment');
+          if (lawyerInput) {
+            saveRecordLawyerAssignment(lawyerInput);
+            return;
+          }
         });
         preview?.addEventListener('click', () => {
           if (document.querySelector('.menu-item.active')?.dataset.panel === 'zap-records') openZapPreview();
@@ -4328,6 +4534,13 @@
       function openIrregularityPreview() {
         const record = irregularitiesRecords.find((row) => String(row.id) === String(selectedIrregularityId));
         if (!record) return;
+        const claim = recordClaimFor('irregularity', record.id);
+        if (!claim || claim.ownerId !== recordCoordinationState.ownerId) {
+          window.alert(getLocaleDictionary().recordClaimUnavailable?.replace('{owner}', claim?.ownerName || 'another client') || 'This record is not claimed by this client.');
+          selectedIrregularityId = null;
+          refreshRecordCoordination();
+          return;
+        }
         const locale = getLocaleDictionary();
         const date = record.receivedAt ? new Date(record.receivedAt) : null;
         const dateText = date ? `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}` : '--';
@@ -4592,9 +4805,11 @@
       function renderZapRecords() {
         const tbody = document.getElementById('zapRecordsBody'); if (!tbody) return;
         const rows = zapRecords.filter(zapMatchesFilter);
-        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="4" class="irregularity-empty">${escapeHtml(getLocaleDictionary().zapRecordsEmpty || 'No voting records reported.')}</td></tr>`; updateZapPreviewButton(); return; }
+        const ownedClaim = recordCoordinationState.claims.find((claim) => claim.type === 'zap-record' && claim.ownerId === recordCoordinationState.ownerId);
+        if (!selectedZapRecordId && ownedClaim) selectedZapRecordId = ownedClaim.recordId;
+        if (!rows.length) { tbody.innerHTML = `<tr><td colspan="5" class="irregularity-empty">${escapeHtml(getLocaleDictionary().zapRecordsEmpty || 'No voting records reported.')}</td></tr>`; updateZapPreviewButton(); return; }
         if (!rows.some((row) => String(row.id) === String(selectedZapRecordId))) selectedZapRecordId = null;
-        tbody.innerHTML = rows.map((row) => { const date = row.receivedAt ? new Date(row.receivedAt) : null; const checked = String(row.id) === String(selectedZapRecordId) ? ' checked' : ''; return `<tr data-zap-id="${escapeHtml(row.id)}"><td class="irregularity-select-cell"><input class="zap-select" type="checkbox" aria-label="Select voting record" data-zap-id="${escapeHtml(row.id)}"${checked}></td><td>${escapeHtml(date ? date.toLocaleDateString() : '--')}</td><td>${escapeHtml(date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--')}</td><td>${escapeHtml(row.place || '--')}</td></tr>`; }).join('');
+        tbody.innerHTML = rows.map((row) => { const date = row.receivedAt ? new Date(row.receivedAt) : null; const checked = String(row.id) === String(selectedZapRecordId); return `<tr data-zap-id="${escapeHtml(row.id)}"><td class="irregularity-select-cell">${recordClaimControl('zap-record', row.id, checked)}</td><td>${escapeHtml(date ? date.toLocaleDateString() : '--')}</td><td>${escapeHtml(date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '--')}</td><td>${escapeHtml(row.place || '--')}</td><td>${lawyerAssignmentControl('zap-record', row)}</td></tr>`; }).join('');
         updateZapPreviewButton();
       }
 
@@ -4608,16 +4823,36 @@
         if (!tbody || tbody.dataset.selectionReady) return;
         tbody.dataset.selectionReady = '1';
         tbody.addEventListener('change', (event) => {
-          const checkbox = event.target.closest('.zap-select');
-          if (!checkbox) return;
-          selectedZapRecordId = checkbox.checked ? checkbox.dataset.zapId : null;
-          renderZapRecords();
+          const claimCheckbox = event.target.closest('.record-open-claim');
+          if (claimCheckbox) {
+            const recordId = claimCheckbox.dataset.recordId;
+            claimCheckbox.disabled = true;
+            updateRecordClaim('zap-record', recordId, claimCheckbox.checked ? 'claim' : 'release')
+              .then(() => {
+                selectedZapRecordId = claimCheckbox.checked ? recordId : null;
+                renderZapRecords();
+              })
+              .catch((error) => {
+                window.alert(error.message);
+                refreshRecordCoordination();
+              });
+            return;
+          }
+          const lawyerInput = event.target.closest('.record-lawyer-assignment');
+          if (lawyerInput) saveRecordLawyerAssignment(lawyerInput);
         });
       }
 
       function openZapPreview() {
         const record = zapRecords.find((row) => String(row.id) === String(selectedZapRecordId));
         if (!record) return;
+        const claim = recordClaimFor('zap-record', record.id);
+        if (!claim || claim.ownerId !== recordCoordinationState.ownerId) {
+          window.alert(getLocaleDictionary().recordClaimUnavailable?.replace('{owner}', claim?.ownerName || 'another client') || 'This record is not claimed by this client.');
+          selectedZapRecordId = null;
+          refreshRecordCoordination();
+          return;
+        }
         const attachment = (record.attachments || []).find((item) => item && item.storedFilename);
         const imageUrl = attachment ? `/api/zap-records/${encodeURIComponent(record.id)}/attachments/${(record.attachments || []).indexOf(attachment)}` : '';
         const date = record.receivedAt ? new Date(record.receivedAt) : null;
@@ -4686,6 +4921,7 @@
           const clearIrregularities = Boolean(document.getElementById('dbClearIrregularities')?.checked);
           const clearZapRecords = Boolean(document.getElementById('dbClearZapRecords')?.checked);
           const clearRemoteConnections = Boolean(document.getElementById('dbClearRemoteConnections')?.checked);
+          const clearLawyerNames = Boolean(document.getElementById('dbClearLawyerNames')?.checked);
           if (document.getElementById('dbClearSender')?.checked) operations.push('sender');
           if (document.getElementById('dbClearStatus')?.checked) operations.push('status');
           if (document.getElementById('dbClearTurnout')?.checked) operations.push('turnout');
@@ -4693,7 +4929,7 @@
           if (document.getElementById('dbClearCorrection')?.checked) operations.push('correction');
 
           const resultEl = document.getElementById('dbClearDataResult');
-          if (!operations.length && !clearRawMessages && !clearIrregularities && !clearZapRecords && !clearRemoteConnections) {
+          if (!operations.length && !clearRawMessages && !clearIrregularities && !clearZapRecords && !clearRemoteConnections && !clearLawyerNames) {
             if (resultEl) resultEl.textContent = locale.dbClearNoneSelected || 'Select at least one option.';
             return;
           }
@@ -4702,6 +4938,7 @@
           if (clearIrregularities && !window.confirm(locale.dbClearIrregularitiesConfirm || 'Delete all irregularities? This cannot be undone.')) return;
           if (clearZapRecords && !window.confirm(locale.dbClearZapRecordsConfirm || 'Delete all polling station records? This cannot be undone.')) return;
           if (clearRemoteConnections && !window.confirm(locale.dbClearRemoteConnectionsConfirm || 'Delete remote session login history? This cannot be undone.')) return;
+          if (clearLawyerNames && !window.confirm(locale.dbClearLawyerNamesConfirm || 'Delete all Lawyer Team names and their record assignments? This cannot be undone.')) return;
 
           try {
             if (operations.length) {
@@ -4733,6 +4970,15 @@
               const data = await response.json();
               if (!response.ok) throw new Error(data.error || 'Remote connection history delete failed');
               await refreshRemoteConnectionHistory();
+            }
+
+            if (clearLawyerNames) {
+              const response = await fetch('/api/record-coordination/lawyer-names', { method: 'DELETE' });
+              const data = await response.json();
+              if (!response.ok) throw new Error(data.error || 'Lawyer Team names delete failed');
+              await refreshIrregularitiesTable();
+              await refreshZapRecords();
+              await refreshRecordCoordination();
             }
 
             if (clearRawMessages) {
@@ -5526,6 +5772,7 @@
       document.addEventListener('DOMContentLoaded', async () => {
         await initializeAccessMode();
         await loadSharedDashboardState();
+        await refreshRecordCoordination();
         if (!remoteAccessMode) setupAccessControl();
         // menu behavior
         document.querySelectorAll('.menu-item').forEach(btn => {
@@ -5594,6 +5841,7 @@
         }
         setInterval(refreshIrregularitiesTable, 5000);
         setInterval(refreshZapRecords, 5000);
+        setInterval(renewOwnedRecordClaims, 30000);
         if (!remoteAccessMode) setInterval(refreshSignalPanel, 8000);
         if (remoteAccessMode) setInterval(syncSharedDashboardState, 5000);
         setInterval(updateSignalCountdownDisplay, 1000);

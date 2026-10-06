@@ -123,6 +123,7 @@
                       <th id="irregularitiesPlaceHeader">Voting place</th>
                       <th id="irregularitiesExplanationHeader">Explanation</th>
                       <th id="irregularitiesApprovedHeader">Approved</th>
+                      <th id="irregularitiesLawyerHeader">Lawyer Team</th>
                     </tr>
                   </thead>
                   <tbody id="irregularitiesBody"></tbody>
@@ -144,7 +145,7 @@
               <section class="irregularities-list-pane">
                 <div class="irregularities-table-wrap">
                   <table class="irregularities-table">
-                    <thead><tr><th class="irregularity-select-header" aria-label="Select"></th><th id="zapDateHeader">Датум</th><th id="zapTimeHeader">Време</th><th id="zapPlaceHeader">Бирачко место</th></tr></thead>
+                    <thead><tr><th class="irregularity-select-header" aria-label="Select"></th><th id="zapDateHeader">Датум</th><th id="zapTimeHeader">Време</th><th id="zapPlaceHeader">Бирачко место</th><th id="zapLawyerHeader">Правни тим</th></tr></thead>
                     <tbody id="zapRecordsBody"></tbody>
                   </table>
                 </div>
@@ -342,6 +343,10 @@
                     <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                       <input type="checkbox" id="dbClearRemoteConnections" class="db-clear-item">
                       <span id="dbClearRemoteConnectionsLabel">Delete Remote Session Logins</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                      <input type="checkbox" id="dbClearLawyerNames" class="db-clear-item">
+                      <span id="dbClearLawyerNamesLabel">Delete All Lawyer Team Names</span>
                     </label>
                   </div>
                 </div>
@@ -578,6 +583,7 @@
       </main>
     </div>
 
+    <datalist id="lawyerTeamNames"></datalist>
     <div id="irregularityPreviewModal" class="irregularity-preview-modal" hidden>
       <div class="irregularity-preview-backdrop" data-preview-close></div>
       <section class="irregularity-preview-window" role="dialog" aria-modal="true" aria-labelledby="irregularityPreviewTitle" tabindex="-1">

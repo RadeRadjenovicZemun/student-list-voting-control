@@ -20,6 +20,7 @@ const {
   projectMediaIrregularities
 } = require('./server/access-policy');
 const { createRemoteConnectionHistory } = require('./server/remote-connection-history');
+const { createRecordCoordination } = require('./server/record-coordination');
 
 const app = express();
 app.use(express.json());
@@ -65,6 +66,7 @@ function clearAccessCookie(res, name) {
 
 function localOnlyEndpoint(req) {
   const pathname = req.path;
+  if (pathname.startsWith('/api/record-coordination/')) return false;
   if (pathname.startsWith('/api/access/requests') || pathname.startsWith('/api/access/sessions')) return true;
   if (pathname.startsWith('/api/access/history')) return true;
   if (pathname === '/api/dashboard-state' && req.method !== 'GET') return true;
@@ -109,6 +111,12 @@ const ZAP_MEDIA_DIR = path.join(DATA_DIR, 'zap_records');
 const REMOTE_CONNECTIONS_PATH = path.join(DATA_DIR, 'remote_connections.json');
 const remoteConnectionHistory = createRemoteConnectionHistory(REMOTE_CONNECTIONS_PATH);
 remoteConnectionHistory.closeOpenConnections();
+const RECORD_COORDINATION_PATH = path.join(DATA_DIR, 'record_coordination.json');
+const recordCoordination = createRecordCoordination(RECORD_COORDINATION_PATH);
+// Remote sessions live in memory only, so their claims are orphaned after a restart.
+recordCoordination.list().claims
+  .filter((claim) => String(claim.ownerId).startsWith('remote:'))
+  .forEach((claim) => recordCoordination.releaseOwner(claim.ownerId));
 
 function getRemoteRequestId(req) {
   return getCookie(req, ACCESS_REQUEST_COOKIE);
@@ -176,6 +184,7 @@ app.post('/access/heartbeat', (req, res) => {
     if (expired) {
       const reason = expired.reason === 'idle-timeout' ? 'session idle timeout' : 'maximum session duration reached';
       remoteConnectionHistory.endSession(expired.requestId, 'expired', `System (${reason})`);
+      recordCoordination.releaseOwner(`remote:${expired.requestId}`);
     }
     clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
     return res.status(401).json({ error: 'session-expired' });
@@ -199,6 +208,7 @@ app.post('/access/logout', (req, res) => {
   const token = getCookie(req, REMOTE_ACCESS_COOKIE);
   const session = remoteAccess.getSessionDetails(token, getClientIp(req));
   remoteAccess.revokeSession(token, getClientIp(req));
+  if (session) recordCoordination.releaseOwner(`remote:${session.requestId}`);
   if (session) remoteConnectionHistory.endSession(session.requestId, 'logged-out', 'Remote user');
   clearAccessCookie(res, REMOTE_ACCESS_COOKIE);
   res.json({ ok: true });
@@ -259,6 +269,7 @@ app.delete('/api/access/sessions/:id', (req, res) => {
   if (!requireLocalOperator(req, res)) return;
   const session = remoteAccess.listSessions().find((item) => item.id === String(req.params.id));
   const ok = remoteAccess.revokeSessionByRequestId(req.params.id);
+  if (ok) recordCoordination.releaseOwner(`remote:${req.params.id}`);
   if (ok && session) remoteConnectionHistory.endSession(session.id, 'revoked', 'Local operator');
   res.json({ ok });
 });
@@ -284,6 +295,7 @@ app.use((req, res, next) => {
     req.remoteAccess = true;
     req.remoteAccessSession = session;
     req.remoteAccessRole = session.role;
+    req.remoteSessionRequestId = session.requestId;
     res.setHeader('X-Access-Role', 'remote');
     return next();
   }
@@ -292,6 +304,7 @@ app.use((req, res, next) => {
   if (expired) {
     const reason = expired.reason === 'idle-timeout' ? 'session idle timeout' : 'maximum session duration reached';
     remoteConnectionHistory.endSession(expired.requestId, 'expired', `System (${reason})`);
+    recordCoordination.releaseOwner(`remote:${expired.requestId}`);
   }
 
   if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'access-approval-required' });
@@ -2799,6 +2812,78 @@ app.get('/api/signal/raw-messages', (req, res) => {
   return res.json(all);
 });
 
+function getRecordClaimOwner(req, clientId) {
+  if (req.remoteAccess && req.remoteSessionRequestId) {
+    return {
+      ownerId: `remote:${req.remoteSessionRequestId}`,
+      role: req.remoteAccessRole || 'lawyer'
+    };
+  }
+  const normalizedClientId = String(clientId || '').trim();
+  if (!/^[a-zA-Z0-9-]{16,80}$/.test(normalizedClientId)) return null;
+  return { ownerId: `local:${normalizedClientId}`, role: 'it' };
+}
+
+app.get('/api/record-coordination', (req, res) => {
+  const owner = getRecordClaimOwner(req, req.query.clientId);
+  if (!owner) return res.status(400).json({ error: 'client-id-required' });
+  const state = recordCoordination.list();
+  res.json({ ...state, ownerId: owner.ownerId });
+});
+
+app.post('/api/record-coordination/claims', (req, res) => {
+  const body = req.body || {};
+  const owner = getRecordClaimOwner(req, body.clientId);
+  if (!owner) return res.status(400).json({ ok: false, error: 'client-id-required' });
+  const claimArgs = {
+    type: body.type,
+    recordId: body.recordId,
+    ownerId: owner.ownerId,
+    ownerName: body.lawyerName,
+    role: owner.role
+  };
+  if (body.action === 'release') {
+    return res.json({ ok: recordCoordination.release(claimArgs) });
+  }
+  const result = recordCoordination.claim(claimArgs);
+  return res.status(result.ok ? 200 : 409).json(result);
+});
+
+app.delete('/api/record-coordination/lawyer-names', (req, res) => {
+  if (!requireLocalOperator(req, res)) return;
+  const removed = recordCoordination.clearLawyerNames();
+  let changed = false;
+  const irregularities = loadIrregularities();
+  irregularities.forEach((record) => { if (record.lawyerName) { record.lawyerName = ''; changed = true; } });
+  if (changed) saveIrregularities(irregularities);
+  changed = false;
+  const zapRecords = loadZapRecords();
+  zapRecords.forEach((record) => { if (record.lawyerName) { record.lawyerName = ''; changed = true; } });
+  if (changed) saveZapRecords(zapRecords);
+  res.json({ ok: true, removed });
+});
+
+app.post('/api/record-coordination/lawyer-assignment', (req, res) => {
+  if (!canApproveIrregularities(req.remoteAccess, req.remoteAccessRole)) {
+    return res.status(403).json({ ok: false, error: 'lawyer-role-required' });
+  }
+  const type = String(req.body && req.body.type || '');
+  const recordId = String(req.body && req.body.recordId || '');
+  const lawyerName = String(req.body && req.body.lawyerName || '').trim().replace(/\s+/g, ' ');
+  if (!['irregularity', 'zap-record'].includes(type) || !recordId) {
+    return res.status(400).json({ ok: false, error: 'invalid-record' });
+  }
+  const records = type === 'irregularity' ? loadIrregularities() : loadZapRecords();
+  const record = records.find((item) => String(item.id) === recordId);
+  if (!record) return res.status(404).json({ ok: false, error: 'record-not-found' });
+  record.lawyerName = lawyerName;
+  record.editedAt = new Date().toISOString();
+  if (lawyerName) recordCoordination.assignLawyerName(lawyerName);
+  if (type === 'irregularity') saveIrregularities(records);
+  else saveZapRecords(records);
+  res.json({ ok: true, record, lawyerNames: recordCoordination.list().lawyerNames });
+});
+
 app.get('/api/irregularities', async (req, res) => {
   const records = loadIrregularities();
   let changed = false;
@@ -2840,6 +2925,10 @@ app.patch('/api/irregularities/:id', (req, res) => {
   record.urgency = normalizeIrregularityCategory(req.body.urgency, 3);
   record.violation = normalizeIrregularityCategory(req.body.violation, 4);
   record.severity = normalizeIrregularityCategory(req.body.severity, 3);
+  if (typeof req.body.lawyerName === 'string') {
+    record.lawyerName = req.body.lawyerName.trim();
+    if (record.lawyerName) recordCoordination.assignLawyerName(record.lawyerName);
+  }
   record.editedAt = new Date().toISOString();
   saveIrregularities(records);
   res.json({ ok: true, record });
@@ -2881,6 +2970,10 @@ app.patch('/api/zap-records/:id', (req, res) => {
   if (req.body && typeof req.body.municipality !== 'undefined') record.municipality = String(req.body.municipality || '');
   if (req.body && typeof req.body.place !== 'undefined') record.place = String(req.body.place || '');
   if (req.body && typeof req.body.receivedAt !== 'undefined') record.receivedAt = String(req.body.receivedAt || new Date().toISOString());
+  if (req.body && typeof req.body.lawyerName === 'string') {
+    record.lawyerName = req.body.lawyerName.trim();
+    if (record.lawyerName) recordCoordination.assignLawyerName(record.lawyerName);
+  }
   record.editedAt = new Date().toISOString();
 
   saveZapRecords(records);
